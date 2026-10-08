@@ -18,6 +18,14 @@ const btnCancelEncode = document.getElementById("btn-cancel-encode");
 const finalizeActions = document.getElementById("finalize-actions");
 const finalizeHint = document.getElementById("finalize-hint");
 const savingsRecapEl = document.getElementById("savings-recap");
+const bulkBar = document.getElementById("bulk-bar");
+const bulkCount = document.getElementById("bulk-count");
+const bulkCq = document.getElementById("bulk-cq");
+const bulkCqVal = document.getElementById("bulk-cq-val");
+const btnBulkDenoiseOn = document.getElementById("btn-bulk-denoise-on");
+const btnBulkDenoiseOff = document.getElementById("btn-bulk-denoise-off");
+const btnBulkStabOn = document.getElementById("btn-bulk-stab-on");
+const btnBulkStabOff = document.getElementById("btn-bulk-stab-off");
 
 let allFiles = [];
 let files = [];
@@ -27,6 +35,8 @@ let uiPersistTimer = null;
 let applyingSession = false;
 let encodeBusy = false;
 let ffmpegCaps = { vidstab: false, hqdn3d: true, hevc_nvenc: false };
+/** Index dans `files` pour Shift+clic (sélection plage) */
+let lastSelectIndex = null;
 /** @type {Map<string, {selected:boolean, denoise:boolean, stabilize:boolean, cq:number, mode:string}>} */
 const rowState = new Map();
 /** Dernière vue jobs pour éviter re-render DOM inutile */
@@ -116,9 +126,49 @@ async function api(path, opts = {}) {
   return res;
 }
 
+function countSelected() {
+  let n = 0;
+  rowState.forEach((st) => {
+    if (st.selected) n += 1;
+  });
+  return n;
+}
+
 function updateEncodeButton() {
-  const n = fileListEl.querySelectorAll('input[type="checkbox"]:checked').length;
+  const n = countSelected();
   btnEncode.disabled = n === 0;
+  if (bulkBar) bulkBar.classList.toggle("hidden", allFiles.length === 0);
+  if (bulkCount) bulkCount.textContent = `${n} sélectionné(s)`;
+  if (btnBulkStabOn) btnBulkStabOn.disabled = !ffmpegCaps.vidstab;
+  if (btnBulkStabOff) btnBulkStabOff.disabled = !ffmpegCaps.vidstab;
+}
+
+function selectedPaths() {
+  const paths = [];
+  rowState.forEach((st, path) => {
+    if (st.selected) paths.push(path);
+  });
+  return paths;
+}
+
+function applyToSelected(mutator) {
+  rememberVisibleRowState();
+  const paths = selectedPaths();
+  if (!paths.length) return;
+  paths.forEach((path) => {
+    const st = rowState.get(path) || {
+      selected: true,
+      denoise: false,
+      stabilize: false,
+      cq: 23,
+      mode: "encode",
+    };
+    mutator(st);
+    if (st.denoise || st.stabilize) st.mode = "encode";
+    rowState.set(path, st);
+  });
+  applyFiltersAndRender({ skipRemember: true });
+  schedulePersistUi();
 }
 
 function fileExt(name) {
@@ -284,8 +334,8 @@ function getFilteredSortedFiles() {
   return list;
 }
 
-function applyFiltersAndRender() {
-  rememberVisibleRowState();
+function applyFiltersAndRender(opts = {}) {
+  if (!opts.skipRemember) rememberVisibleRowState();
   files = getFilteredSortedFiles();
   if (filterMeta) {
     filterMeta.textContent =
@@ -316,10 +366,38 @@ function renderFiles(list) {
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = st.selected;
+    cb.addEventListener("click", (ev) => {
+      const idx = files.findIndex((x) => x.path === f.path);
+      if (ev.shiftKey && lastSelectIndex != null && idx >= 0) {
+        ev.preventDefault();
+        const from = Math.min(lastSelectIndex, idx);
+        const to = Math.max(lastSelectIndex, idx);
+        rememberVisibleRowState();
+        for (let i = from; i <= to; i++) {
+          const p = files[i].path;
+          const cur = rowState.get(p) || {
+            selected: false,
+            denoise: false,
+            stabilize: false,
+            cq: 23,
+            mode: files[i].action === "remux" ? "remux" : "encode",
+          };
+          cur.selected = true;
+          rowState.set(p, cur);
+        }
+        applyFiltersAndRender({ skipRemember: true });
+        schedulePersistUi();
+        return;
+      }
+      // Clic simple : laisser le navigateur basculer, puis sync
+      lastSelectIndex = idx >= 0 ? idx : lastSelectIndex;
+    });
     cb.addEventListener("change", () => {
       row.classList.toggle("selected", cb.checked);
       rememberVisibleRowState();
       updateEncodeButton();
+      const idx = files.findIndex((x) => x.path === f.path);
+      if (idx >= 0) lastSelectIndex = idx;
     });
 
     const img = document.createElement("img");
@@ -562,8 +640,12 @@ async function pollSession({ bootstrap = false } = {}) {
           jobs,
           jobs_status: data.jobs_status,
         });
-      } else if (bootstrap) {
-        recapPanel.classList.add("hidden");
+      } else if (bootstrap && recapBody) {
+        recapBody.innerHTML = "";
+        if (batchMeta) {
+          batchMeta.textContent =
+            "Aucun job en cours. Lancez un encodage pour suivre la progression ici.";
+        }
       }
     }
     if (data.jobs_status) updateJobsBadge(data.jobs_status);
@@ -674,7 +756,6 @@ function setRowProgress(path, pct, label, jobId, canCancel) {
 }
 
 function renderRecap(batch) {
-  recapPanel.classList.remove("hidden");
   const active = (batch.jobs || []).filter((j) => j.state === "running" || j.state === "queued").length;
   const doneN = (batch.jobs || []).filter((j) => j.state === "done").length;
   batchMeta.textContent = batch.running
@@ -775,7 +856,6 @@ btnEncode.addEventListener("click", async () => {
       method: "POST",
       body: JSON.stringify({ files: selected, options }),
     });
-    recapPanel.classList.remove("hidden");
     lastJobsSig = "";
     await pollSession();
   } catch (e) {
@@ -784,6 +864,54 @@ btnEncode.addEventListener("click", async () => {
     updateEncodeButton();
   }
 });
+
+if (bulkCq) {
+  bulkCq.addEventListener("input", () => {
+    if (bulkCqVal) bulkCqVal.textContent = bulkCq.value;
+  });
+  bulkCq.addEventListener("change", () => {
+    const cq = parseInt(bulkCq.value, 10) || 23;
+    if (bulkCqVal) bulkCqVal.textContent = String(cq);
+    applyToSelected((st) => {
+      st.cq = cq;
+      if (st.mode === "remux") st.mode = "encode";
+    });
+  });
+}
+if (btnBulkDenoiseOn) {
+  btnBulkDenoiseOn.addEventListener("click", () => {
+    applyToSelected((st) => {
+      st.denoise = true;
+      st.mode = "encode";
+    });
+  });
+}
+if (btnBulkDenoiseOff) {
+  btnBulkDenoiseOff.addEventListener("click", () => {
+    applyToSelected((st) => {
+      st.denoise = false;
+    });
+  });
+}
+if (btnBulkStabOn) {
+  btnBulkStabOn.addEventListener("click", () => {
+    if (!ffmpegCaps.vidstab) {
+      alert("vidstab indisponible dans ce build FFmpeg");
+      return;
+    }
+    applyToSelected((st) => {
+      st.stabilize = true;
+      st.mode = "encode";
+    });
+  });
+}
+if (btnBulkStabOff) {
+  btnBulkStabOff.addEventListener("click", () => {
+    applyToSelected((st) => {
+      st.stabilize = false;
+    });
+  });
+}
 
 async function finalizeBatch(mode) {
   const msg =

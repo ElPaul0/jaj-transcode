@@ -77,30 +77,51 @@
       </label>
       <span class="meta" id="filter-meta"></span>
     </div>
-    <div id="file-list" class="file-list"></div>
 
-    <section id="recap-panel" class="panel hidden">
-      <h2>Jobs (instance partagée)</h2>
-      <p class="meta" id="batch-meta"></p>
-      <table class="recap-table">
-        <thead>
-          <tr>
-            <th>Fichier</th>
-            <th>État / phase</th>
-            <th>Progression</th>
-          </tr>
-        </thead>
-        <tbody id="recap-body"></tbody>
-      </table>
-      <h3 class="log-title">Journal FFmpeg</h3>
-      <pre id="job-log" class="job-log">En attente…</pre>
-      <p class="meta hidden" id="finalize-hint">Uniquement les encodages réussis (état « Enregistré à côté ») — les erreurs ne sont jamais touchées.</p>
-      <p class="finalize-actions hidden" id="finalize-actions">
-        <button type="button" id="btn-delete-original" class="primary">Supprimer les originaux (garder les .mp4)</button>
-        <button type="button" id="btn-cancel-encode" class="danger">Annuler (supprimer les encodages .mp4)</button>
-      </p>
-      <div id="savings-recap" class="savings-recap hidden"></div>
-    </section>
+    <div class="bulk-bar hidden" id="bulk-bar">
+      <span class="bulk-title">Sur la sélection</span>
+      <span class="meta" id="bulk-count">0 sélectionné(s)</span>
+      <label class="bulk-cq-label" title="CQ NVENC — plus bas = meilleure qualité / fichier plus gros">
+        CQ <span id="bulk-cq-val">23</span>
+        <input type="range" id="bulk-cq" min="18" max="35" value="23">
+      </label>
+      <button type="button" id="btn-bulk-denoise-on" title="Activer le débruitage sur la sélection">Débruiter</button>
+      <button type="button" id="btn-bulk-denoise-off" title="Désactiver le débruitage sur la sélection">Sans débruitage</button>
+      <button type="button" id="btn-bulk-stab-on" title="Activer la stabilisation sur la sélection">Stabiliser</button>
+      <button type="button" id="btn-bulk-stab-off" title="Désactiver la stabilisation sur la sélection">Sans stab</button>
+      <span class="meta bulk-hint">Shift+clic pour sélectionner une plage</span>
+    </div>
+
+    <div class="workspace">
+      <section class="workspace-left" aria-label="Fichiers">
+        <div id="file-list" class="file-list"></div>
+      </section>
+
+      <aside id="recap-panel" class="workspace-right panel" aria-label="Jobs et journal">
+        <h2>Jobs</h2>
+        <p class="meta" id="batch-meta">Aucun job en cours. Lancez un encodage pour suivre la progression ici.</p>
+        <div class="recap-table-wrap">
+          <table class="recap-table">
+            <thead>
+              <tr>
+                <th>Fichier</th>
+                <th>État / phase</th>
+                <th>Progression</th>
+              </tr>
+            </thead>
+            <tbody id="recap-body"></tbody>
+          </table>
+        </div>
+        <h3 class="log-title">Journal FFmpeg</h3>
+        <pre id="job-log" class="job-log">En attente…</pre>
+        <p class="meta hidden" id="finalize-hint">Uniquement les encodages réussis (état « Enregistré à côté ») — les erreurs ne sont jamais touchées.</p>
+        <p class="finalize-actions hidden" id="finalize-actions">
+          <button type="button" id="btn-delete-original" class="primary">Supprimer les originaux (garder les .mp4)</button>
+          <button type="button" id="btn-cancel-encode" class="danger">Annuler (supprimer les encodages .mp4)</button>
+        </p>
+        <div id="savings-recap" class="savings-recap hidden"></div>
+      </aside>
+    </div>
   </main>
 
   <script src="/static/app.js"></script>

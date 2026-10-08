@@ -797,7 +797,31 @@ def _want_remux(job: EncodeJob) -> bool:
     if job.options.denoise or job.options.stabilize:
         return False
     mode = (job.options.mode or "auto").lower()
-    return mode == "remux"
+    if mode == "remux":
+        return True
+    if mode == "encode":
+        return False
+    # auto : remux si le scan / probe le recommande, sinon encode HEVC
+    try:
+        from app import session as app_session
+
+        scan = app_session.get_last_scan() or {}
+        src = Path(job.source).resolve()
+        for f in scan.get("files") or []:
+            try:
+                if Path(str(f.get("path") or "")).resolve() == src:
+                    return f.get("action") == "remux"
+            except OSError:
+                if f.get("path") == job.source:
+                    return f.get("action") == "remux"
+    except Exception:
+        pass
+    try:
+        from app.scanner import suggest_action
+
+        return suggest_action(job.source) == "remux"
+    except Exception:
+        return False
 
 
 def _probe_format_tags(path: str) -> dict[str, str]:

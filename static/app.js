@@ -26,6 +26,9 @@ const bulkBar = document.getElementById("bulk-bar");
 const bulkCount = document.getElementById("bulk-count");
 const bulkCq = document.getElementById("bulk-cq");
 const bulkCqVal = document.getElementById("bulk-cq-val");
+const btnBulkAuto = document.getElementById("btn-bulk-auto");
+const btnBulkRemux = document.getElementById("btn-bulk-remux");
+const btnBulkEncode = document.getElementById("btn-bulk-encode");
 const btnBulkDenoiseOn = document.getElementById("btn-bulk-denoise-on");
 const btnBulkDenoiseOff = document.getElementById("btn-bulk-denoise-off");
 const btnBulkStabOn = document.getElementById("btn-bulk-stab-on");
@@ -173,15 +176,18 @@ function applyToSelected(mutator) {
   const paths = selectedPaths();
   if (!paths.length) return;
   paths.forEach((path) => {
+    const file = allFiles.find((f) => f.path === path);
     const st = rowState.get(path) || {
       selected: true,
       denoise: false,
       stabilize: false,
       cq: 23,
-      mode: "encode",
+      mode: "auto",
     };
-    mutator(st);
+    mutator(st, path, file);
     if (st.denoise || st.stabilize) st.mode = "encode";
+    // Remux forcé impossible si le scan dit encode-only
+    if (st.mode === "remux" && file && file.action !== "remux") st.mode = "encode";
     rowState.set(path, st);
   });
   applyFiltersAndRender({ skipRemember: true });
@@ -216,10 +222,10 @@ function getRowOptions(path) {
       denoise: st.denoise,
       stabilize: st.stabilize,
       cq: st.cq,
-      mode: st.denoise || st.stabilize ? "encode" : st.mode || "encode",
+      mode: st.denoise || st.stabilize ? "encode" : st.mode || "auto",
     };
   }
-  return { denoise: false, stabilize: false, cq: 23, mode: "encode" };
+  return { denoise: false, stabilize: false, cq: 23, mode: "auto" };
 }
 
 function rememberVisibleRowState() {
@@ -387,13 +393,12 @@ function renderFiles(list) {
   fileListEl.innerHTML = "";
   const workDir = workDirEl.value.trim();
   list.forEach((f) => {
-    const defaultMode = f.action === "remux" ? "remux" : "encode";
     const st = rowState.get(f.path) || {
       selected: true,
       denoise: false,
       stabilize: false,
       cq: 23,
-      mode: defaultMode,
+      mode: "auto",
     };
     const row = document.createElement("div");
     row.className = "file-row";
@@ -417,7 +422,7 @@ function renderFiles(list) {
             denoise: false,
             stabilize: false,
             cq: 23,
-            mode: files[i].action === "remux" ? "remux" : "encode",
+            mode: "auto",
           };
           cur.selected = true;
           rowState.set(p, cur);
@@ -435,7 +440,7 @@ function renderFiles(list) {
         denoise: false,
         stabilize: false,
         cq: 23,
-        mode: f.action === "remux" ? "remux" : "encode",
+        mode: "auto",
       };
       cur.selected = !!cb.checked;
       rowState.set(f.path, cur);
@@ -466,12 +471,13 @@ function renderFiles(list) {
 
     const opts = document.createElement("div");
     opts.className = "file-opts";
-    const isRemux = (st.mode || defaultMode) === "remux";
+    const modeVal = st.mode || "auto";
     opts.innerHTML = `
       <label>Traitement
         <select class="opt-mode">
-          <option value="remux" ${isRemux ? "selected" : ""}>Remux MP4 (rapide)</option>
-          <option value="encode" ${!isRemux ? "selected" : ""}>Réencoder HEVC</option>
+          <option value="auto" ${modeVal === "auto" ? "selected" : ""}>Auto (HEVC ou remux)</option>
+          <option value="remux" ${modeVal === "remux" ? "selected" : ""}>Remux MP4 (rapide)</option>
+          <option value="encode" ${modeVal === "encode" ? "selected" : ""}>Réencoder HEVC</option>
         </select>
       </label>
       <label><input type="checkbox" class="opt-denoise"> Débruiter (hqdn3d)</label>
@@ -486,10 +492,12 @@ function renderFiles(list) {
       <div class="progress-label"></div>
     `;
     const modeSel = opts.querySelector(".opt-mode");
-    // Si scan dit encode-only, pas d'option remux
+    // Si scan dit encode-only : auto ou encode (pas de remux forcé)
     if (f.action !== "remux") {
-      modeSel.innerHTML = '<option value="encode" selected>Réencoder HEVC</option>';
-      modeSel.disabled = true;
+      const keep = modeVal === "encode" ? "encode" : "auto";
+      modeSel.innerHTML = `
+        <option value="auto" ${keep === "auto" ? "selected" : ""}>Auto (HEVC)</option>
+        <option value="encode" ${keep === "encode" ? "selected" : ""}>Réencoder HEVC</option>`;
     }
     opts.querySelector(".opt-denoise").checked = st.denoise;
     opts.querySelector(".opt-stabilize").checked = st.stabilize;
@@ -498,7 +506,8 @@ function renderFiles(list) {
     const cqLabel = opts.querySelector(".opt-cq-label");
 
     function syncModeUi() {
-      const remux = modeSel.value === "remux";
+      const m = modeSel.value;
+      const remux = m === "remux" || (m === "auto" && f.action === "remux");
       if (remux) {
         opts.querySelector(".opt-denoise").checked = false;
         opts.querySelector(".opt-stabilize").checked = false;
@@ -688,14 +697,14 @@ function applyScanFromSession(scan, rows) {
             denoise: !!sr.denoise,
             stabilize: !!sr.stabilize,
             cq: parseInt(sr.cq, 10) || 23,
-            mode: sr.mode || (f.action === "remux" ? "remux" : "encode"),
+            mode: sr.mode || "auto",
           }
         : {
             selected: true,
             denoise: false,
             stabilize: false,
             cq: 23,
-            mode: f.action === "remux" ? "remux" : "encode",
+            mode: "auto",
           }
     );
   });
@@ -781,7 +790,7 @@ btnScan.addEventListener("click", async () => {
           denoise: false,
           stabilize: false,
           cq: 23,
-          mode: f.action === "remux" ? "remux" : "encode",
+          mode: "auto",
         }
       );
     });
@@ -816,7 +825,7 @@ btnSelectAll.addEventListener("click", () => {
       denoise: false,
       stabilize: false,
       cq: 23,
-      mode: f.action === "remux" ? "remux" : "encode",
+      mode: "auto",
     };
     cur.selected = true;
     rowState.set(f.path, cur);
@@ -1005,7 +1014,7 @@ btnEncode.addEventListener("click", async () => {
       denoise: !!st.denoise,
       stabilize: !!st.stabilize,
       cq: st.cq || 23,
-      mode: st.denoise || st.stabilize ? "encode" : st.mode || "encode",
+      mode: st.denoise || st.stabilize ? "encode" : st.mode || "auto",
     };
   });
   // Sync options depuis les lignes visibles (plus à jour)
@@ -1042,7 +1051,33 @@ if (bulkCq) {
     if (bulkCqVal) bulkCqVal.textContent = String(cq);
     applyToSelected((st) => {
       st.cq = cq;
-      if (st.mode === "remux") st.mode = "encode";
+      if (st.mode === "remux" || st.mode === "auto") st.mode = "encode";
+    });
+  });
+}
+if (btnBulkAuto) {
+  btnBulkAuto.addEventListener("click", () => {
+    applyToSelected((st) => {
+      st.mode = "auto";
+      st.denoise = false;
+      st.stabilize = false;
+    });
+  });
+}
+if (btnBulkRemux) {
+  btnBulkRemux.addEventListener("click", () => {
+    applyToSelected((st, _path, file) => {
+      if (file && file.action !== "remux") return;
+      st.mode = "remux";
+      st.denoise = false;
+      st.stabilize = false;
+    });
+  });
+}
+if (btnBulkEncode) {
+  btnBulkEncode.addEventListener("click", () => {
+    applyToSelected((st) => {
+      st.mode = "encode";
     });
   });
 }

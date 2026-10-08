@@ -193,7 +193,7 @@ def scan(body: ScanRequest):
                 "denoise": False,
                 "stabilize": False,
                 "cq": 23,
-                "mode": "remux" if f.get("action") == "remux" else "encode",
+                "mode": "auto",
             }
     # Retire les chemins qui ne sont plus dans le scan
     keep = {f["path"] for f in files}

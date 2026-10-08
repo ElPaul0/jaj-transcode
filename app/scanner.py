@@ -84,6 +84,24 @@ def _probe_one(path: Path) -> dict:
         return {"error": "ffprobe json invalide"}
 
 
+def suggest_action(path: str | Path) -> str:
+    """encode | remux — classification rapide pour le mode auto."""
+    p = Path(path)
+    data = _probe_one(p)
+    if data.get("error"):
+        return "encode"
+    vcodec = ""
+    acodec = ""
+    for stream in data.get("streams") or []:
+        ctype = stream.get("codec_type")
+        if ctype == "video" and not vcodec:
+            vcodec = stream.get("codec_name") or ""
+        elif ctype == "audio" and not acodec:
+            acodec = stream.get("codec_name") or ""
+    action, _label = classify_action(p, vcodec, acodec)
+    return action
+
+
 def classify_action(
     path: Path,
     video_codec: str,

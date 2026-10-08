@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>jaj-transcode</title>
-  <link rel="stylesheet" href="/static/style.css?v=selhide1">
+  <link rel="stylesheet" href="/static/style.css?v=bulkauto1">
 </head>
 <body>
   <header>
@@ -100,6 +100,9 @@
         CQ <span id="bulk-cq-val">23</span>
         <input type="range" id="bulk-cq" min="18" max="35" value="23">
       </label>
+      <button type="button" id="btn-bulk-auto" title="Auto : remux si possible, sinon réencode HEVC (recommandation du scan)">Auto</button>
+      <button type="button" id="btn-bulk-remux" title="Forcer remux MP4 (fichiers éligibles uniquement)">Remux MP4</button>
+      <button type="button" id="btn-bulk-encode" title="Forcer réencode HEVC">Réencoder HEVC</button>
       <button type="button" id="btn-bulk-denoise-on" title="Activer le débruitage sur la sélection">Débruiter</button>
       <button type="button" id="btn-bulk-denoise-off" title="Désactiver le débruitage sur la sélection">Sans débruitage</button>
       <button type="button" id="btn-bulk-stab-on" title="Activer la stabilisation sur la sélection">Stabiliser</button>
@@ -140,6 +143,6 @@
     </div>
   </main>
 
-  <script src="/static/app.js?v=selhide1"></script>
+  <script src="/static/app.js?v=bulkauto1"></script>
 </body>
 </html>

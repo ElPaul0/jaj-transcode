@@ -353,9 +353,26 @@ function getFilteredSortedFiles() {
   return list;
 }
 
+function deselectHiddenFiles(visibleList) {
+  const visible = new Set(visibleList.map((f) => f.path));
+  let changed = false;
+  for (const f of allFiles) {
+    if (visible.has(f.path)) continue;
+    const st = rowState.get(f.path);
+    if (st && st.selected) {
+      st.selected = false;
+      rowState.set(f.path, st);
+      changed = true;
+    }
+  }
+  if (changed) schedulePersistUi();
+}
+
 function applyFiltersAndRender(opts = {}) {
   if (!opts.skipRemember) rememberVisibleRowState();
   files = getFilteredSortedFiles();
+  // Hors vue filtrée = hors sélection (évite les remux encore cochés après filtre HEVC)
+  if (!opts.keepHiddenSelection) deselectHiddenFiles(files);
   if (filterMeta) {
     filterMeta.textContent =
       allFiles.length === files.length
@@ -363,6 +380,7 @@ function applyFiltersAndRender(opts = {}) {
         : `${files.length} / ${allFiles.length} fichier(s)`;
   }
   renderFiles(files);
+  updateEncodeButton();
 }
 
 function renderFiles(list) {

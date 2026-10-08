@@ -1,10 +1,14 @@
 const workDirEl = document.getElementById("work-dir");
 const btnScan = document.getElementById("btn-scan");
 const btnDedup = document.getElementById("btn-dedup");
+const dedupLogEl = document.getElementById("dedup-log");
+const dedupLogTitle = document.getElementById("dedup-log-title");
 const btnSelectAll = document.getElementById("btn-select-all");
 const btnSelectNone = document.getElementById("btn-select-none");
 const btnEncode = document.getElementById("btn-encode");
 const btnStopAll = document.getElementById("btn-stop-all");
+/** Analyse doublons en cours (pour afficher Stop) */
+let dedupBusy = false;
 const fileListEl = document.getElementById("file-list");
 const scanMetaEl = document.getElementById("scan-meta");
 const gpuBadge = document.getElementById("gpu-badge");
@@ -648,7 +652,11 @@ function updateJobsBadge(status) {
   jobsBadge.classList.toggle("ok", r > 0);
   jobsBadge.classList.toggle("err", re >= maxE && rr >= maxR && q > 0);
   encodeBusy = r > 0 || q > 0;
-  if (btnStopAll) btnStopAll.classList.toggle("hidden", !encodeBusy);
+  refreshStopButton();
+}
+
+function refreshStopButton() {
+  if (btnStopAll) btnStopAll.classList.toggle("hidden", !(encodeBusy || dedupBusy));
 }
 
 function fillConcurrencySelect(selectEl, selected, cap) {
@@ -797,54 +805,127 @@ async function pollSession({ bootstrap = false } = {}) {
   }
 }
 
+let dedupPollTimer = null;
+let dedupJobId = null;
+
+function showDedupLog(lines, message) {
+  if (dedupLogTitle) dedupLogTitle.classList.remove("hidden");
+  if (dedupLogEl) {
+    dedupLogEl.classList.remove("hidden");
+    const text = (lines && lines.length ? lines.join("\n") : "") +
+      (message ? `\n› ${message}` : "");
+    dedupLogEl.textContent = text || "—";
+    dedupLogEl.scrollTop = dedupLogEl.scrollHeight;
+  }
+}
+
+function setDedupUiRunning(running) {
+  dedupBusy = !!running;
+  if (btnDedup) {
+    btnDedup.disabled = running;
+    btnDedup.textContent = running ? "Analyse…" : "Doublons";
+  }
+  refreshStopButton();
+}
+
+async function cancelDedupAnalysis() {
+  try {
+    await api("/api/dedup/cancel", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    showDedupLog(null, "Annulation demandée…");
+  } catch (e) {
+    /* pas de job = ok */
+  }
+}
+
+async function finishDedupFromResult(data) {
+  if (!(data.group_count > 0) || !(data.delete_count > 0)) {
+    alert(
+      `Aucun doublon (même nom + taille) trouvé.\n(${data.files_scanned || 0} fichiers scannés)`
+    );
+    return;
+  }
+  const ok = confirm(
+    formatDedupPreview(data) +
+      "\n\nSupprimer les copies en trop ?\n(critère: même nom + même taille — conserve .mp4 / noms propres / plus récents)"
+  );
+  if (!ok) return;
+  const paths = [];
+  (data.groups || []).forEach((g) => {
+    (g.delete || []).forEach((d) => {
+      if (d.path) paths.push(d.path);
+    });
+  });
+  const res = await api("/api/dedup/delete", {
+    method: "POST",
+    body: JSON.stringify({
+      paths,
+      work_dir: workDirEl.value.trim(),
+    }),
+  });
+  if (res.savings) updateSavingsBadge(res.savings);
+  if (res.run_savings) renderRunSavings(res.run_savings, res.savings);
+  alert(
+    `Dédoublonnage: ${res.deleted || 0} fichier(s) supprimé(s) · ${formatSaved(res.bytes_freed || 0)}`
+  );
+  btnScan.click();
+}
+
+async function pollDedupStatus() {
+  try {
+    const q = dedupJobId ? `?job_id=${encodeURIComponent(dedupJobId)}` : "";
+    const st = await api(`/api/dedup/status${q}`);
+    showDedupLog(st.log || [], st.message || "");
+    if (st.id) dedupJobId = st.id;
+    if (st.state === "running") {
+      setDedupUiRunning(true);
+      return;
+    }
+    if (dedupPollTimer) {
+      clearInterval(dedupPollTimer);
+      dedupPollTimer = null;
+    }
+    setDedupUiRunning(false);
+    if (st.state === "done" && st.result) {
+      await finishDedupFromResult(st.result);
+    } else if (st.state === "error") {
+      alert(`Doublons: ${st.error || st.message || "erreur"}`);
+    } else if (st.state === "cancelled") {
+      alert("Analyse doublons annulée.");
+    }
+  } catch (e) {
+    if (dedupPollTimer) {
+      clearInterval(dedupPollTimer);
+      dedupPollTimer = null;
+    }
+    setDedupUiRunning(false);
+    alert(`Doublons (status): ${e.message}`);
+  }
+}
+
 if (btnDedup) {
   btnDedup.addEventListener("click", async () => {
-    const prev = btnDedup.textContent;
-    btnDedup.disabled = true;
-    btnDedup.textContent = "Doublons…";
+    setDedupUiRunning(true);
+    showDedupLog([], "Démarrage…");
     try {
-      const data = await api("/api/dedup/scan", {
+      const job = await api("/api/dedup/scan", {
         method: "POST",
         body: JSON.stringify({ work_dir: workDirEl.value.trim() }),
       });
-      if (!(data.group_count > 0) || !(data.delete_count > 0)) {
-        alert(
-          `Aucun doublon exact trouvé.\n(${data.files_scanned || 0} fichiers scannés)`
-        );
-        return;
-      }
-      const ok = confirm(
-        formatDedupPreview(data) +
-          "\n\nSupprimer les copies en trop ?\n(conserve .mp4 / noms propres / fichiers plus récents en priorité)"
-      );
-      if (!ok) return;
-      const paths = [];
-      (data.groups || []).forEach((g) => {
-        (g.delete || []).forEach((d) => {
-          if (d.path) paths.push(d.path);
-        });
-      });
-      const res = await api("/api/dedup/delete", {
-        method: "POST",
-        body: JSON.stringify({
-          paths,
-          work_dir: workDirEl.value.trim(),
-        }),
-      });
-      if (res.savings) updateSavingsBadge(res.savings);
-      if (res.run_savings) renderRunSavings(res.run_savings, res.savings);
-      alert(
-        `Dédoublonnage: ${res.deleted || 0} fichier(s) supprimé(s) · ${formatSaved(res.bytes_freed || 0)}`
-      );
-      btnScan.click();
+      dedupJobId = job.id || null;
+      showDedupLog(job.log || [], job.message || "En cours…");
+      if (dedupPollTimer) clearInterval(dedupPollTimer);
+      dedupPollTimer = setInterval(pollDedupStatus, 1000);
+      await pollDedupStatus();
     } catch (e) {
+      setDedupUiRunning(false);
       alert(`Doublons: ${e.message}`);
-    } finally {
-      btnDedup.disabled = false;
-      btnDedup.textContent = prev;
     }
   });
 }
+
 
 btnScan.addEventListener("click", async () => {
   scanMetaEl.textContent = "Analyse en cours…";
@@ -1238,15 +1319,30 @@ btnDeleteOriginal.addEventListener("click", () => finalizeBatch("delete_original
 btnCancelEncode.addEventListener("click", () => finalizeBatch("cancel"));
 
 btnStopAll.addEventListener("click", async () => {
-  if (!confirm("Stopper tous les jobs en cours et en file d'attente ?")) return;
+  if (!confirm("Stopper encode/remux et l'analyse doublons en cours ?")) return;
+  const parts = [];
   try {
-    const res = await api("/api/jobs/stop-all", { method: "POST", body: "{}" });
-    updateJobsBadge(res.jobs_status);
-    lastJobsSig = "";
-    await pollSession();
-    alert(
-      `Stop: ${res.cancel_running || 0} en cours, ${res.cancelled_queued || 0} en file annulé(s).`
-    );
+    if (dedupBusy) {
+      await cancelDedupAnalysis();
+      parts.push("doublons: annulation demandée");
+    }
+    if (encodeBusy) {
+      const res = await api("/api/jobs/stop-all", { method: "POST", body: "{}" });
+      updateJobsBadge(res.jobs_status);
+      lastJobsSig = "";
+      await pollSession();
+      parts.push(
+        `jobs: ${res.cancel_running || 0} en cours, ${res.cancelled_queued || 0} en file`
+      );
+    }
+    if (!parts.length) {
+      // Au cas où l'UI n'a pas encore le flag
+      await cancelDedupAnalysis();
+      const res = await api("/api/jobs/stop-all", { method: "POST", body: "{}" });
+      updateJobsBadge(res.jobs_status);
+      parts.push("stop envoyé");
+    }
+    alert(`Stop: ${parts.join(" · ")}`);
   } catch (e) {
     alert(`Stop: ${e.message}`);
   }

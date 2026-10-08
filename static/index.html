@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>jaj-transcode</title>
-  <link rel="stylesheet" href="/static/style.css?v=dedup1">
+  <link rel="stylesheet" href="/static/style.css?v=dedup3">
 </head>
 <body>
   <header>
@@ -34,11 +34,11 @@
     <label for="work-dir">Répertoire de travail</label>
     <input type="text" id="work-dir" value="/data/videos" placeholder="/chemin/vers/vos/videos">
     <button type="button" id="btn-scan">Analyser</button>
-    <button type="button" id="btn-dedup" title="Détecter et supprimer les fichiers vidéo au contenu identique">Doublons</button>
+    <button type="button" id="btn-dedup" title="Détecter les doublons (même nom + même taille)">Doublons</button>
     <button type="button" id="btn-select-all">Tout sélectionner</button>
     <button type="button" id="btn-select-none">Aucun</button>
     <button type="button" id="btn-encode" class="primary" disabled title="Lancer encode / remux sur la sélection">Go</button>
-    <button type="button" id="btn-stop-all" class="danger hidden">Stop tout</button>
+    <button type="button" id="btn-stop-all" class="danger hidden" title="Stopper encode/remux et analyse doublons">Stop</button>
   </div>
 
   <main>
@@ -133,6 +133,8 @@
         </div>
         <h3 class="log-title">Journal FFmpeg</h3>
         <pre id="job-log" class="job-log">En attente…</pre>
+        <h3 class="log-title hidden" id="dedup-log-title">Journal doublons</h3>
+        <pre id="dedup-log" class="job-log hidden">—</pre>
         <p class="meta hidden" id="finalize-hint">Uniquement les encodages réussis (état « Enregistré à côté ») — les erreurs ne sont jamais touchées.</p>
         <div id="pending-savings" class="savings-recap pending-savings hidden"></div>
         <p class="finalize-actions hidden" id="finalize-actions">
@@ -144,6 +146,6 @@
     </div>
   </main>
 
-  <script src="/static/app.js?v=dedup1"></script>
+  <script src="/static/app.js?v=dedup3"></script>
 </body>
 </html>

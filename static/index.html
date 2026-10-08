@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>jaj-transcode</title>
-  <link rel="stylesheet" href="/static/style.css?v=3eb0e77">
+  <link rel="stylesheet" href="/static/style.css?v=9efd4f8">
 </head>
 <body>
   <header>
@@ -13,6 +13,13 @@
     <span id="ffmpeg-badge" class="badge"></span>
     <span id="jobs-badge" class="badge">Jobs: 0/2</span>
     <span id="savings-badge" class="badge" title="Économies après remplacement des originaux">Économisé: —</span>
+    <label class="theme-toggle" title="Thème">
+      <span class="theme-label">Thème</span>
+      <select id="theme-select" aria-label="Thème clair ou sombre">
+        <option value="dark">Sombre</option>
+        <option value="light">Clair</option>
+      </select>
+    </label>
   </header>
 
   <div class="toolbar">
@@ -21,7 +28,7 @@
     <button type="button" id="btn-scan">Analyser</button>
     <button type="button" id="btn-select-all">Tout sélectionner</button>
     <button type="button" id="btn-select-none">Aucun</button>
-    <button type="button" id="btn-encode" class="primary" disabled>Encoder la sélection</button>
+    <button type="button" id="btn-encode" class="primary" disabled title="Lancer encode / remux sur la sélection">Go</button>
     <button type="button" id="btn-stop-all" class="danger hidden">Stop tout</button>
   </div>
 
@@ -115,8 +122,9 @@
         <h3 class="log-title">Journal FFmpeg</h3>
         <pre id="job-log" class="job-log">En attente…</pre>
         <p class="meta hidden" id="finalize-hint">Uniquement les encodages réussis (état « Enregistré à côté ») — les erreurs ne sont jamais touchées.</p>
+        <div id="pending-savings" class="savings-recap pending-savings hidden"></div>
         <p class="finalize-actions hidden" id="finalize-actions">
-          <button type="button" id="btn-delete-original" class="primary">Supprimer les originaux (garder les .mp4)</button>
+          <button type="button" id="btn-delete-original" class="primary">Remplacer les originaux (garder les .mp4)</button>
           <button type="button" id="btn-cancel-encode" class="danger">Annuler (supprimer les encodages .mp4)</button>
         </p>
         <div id="savings-recap" class="savings-recap hidden"></div>
@@ -124,6 +132,6 @@
     </div>
   </main>
 
-  <script src="/static/app.js?v=3eb0e77"></script>
+  <script src="/static/app.js?v=9efd4f8"></script>
 </body>
 </html>

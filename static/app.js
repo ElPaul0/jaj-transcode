@@ -18,6 +18,8 @@ const btnCancelEncode = document.getElementById("btn-cancel-encode");
 const finalizeActions = document.getElementById("finalize-actions");
 const finalizeHint = document.getElementById("finalize-hint");
 const savingsRecapEl = document.getElementById("savings-recap");
+const pendingSavingsEl = document.getElementById("pending-savings");
+const themeSelect = document.getElementById("theme-select");
 const bulkBar = document.getElementById("bulk-bar");
 const bulkCount = document.getElementById("bulk-count");
 const bulkCq = document.getElementById("bulk-cq");
@@ -819,10 +821,57 @@ function renderRecap(batch) {
       finalizeHint.textContent =
         errN > 0
           ? `${doneOk} réussi(s) seront concernés — ${errN} échec(s) ignorés (originaux inchangés).`
-          : `${doneOk} encodage(s) réussis prêts à finaliser.`;
+          : `${doneOk} fichier(s) prêt(s) à finaliser.`;
     }
   }
+  if (pendingSavingsEl) {
+    if (showFinalize) refreshPendingSavings();
+    else pendingSavingsEl.classList.add("hidden");
+  }
   if (batch.jobs_status) updateJobsBadge(batch.jobs_status);
+}
+
+async function refreshPendingSavings() {
+  if (!pendingSavingsEl) return;
+  try {
+    const p = await api("/api/replace/preview");
+    if (!p || !(p.files > 0)) {
+      pendingSavingsEl.classList.add("hidden");
+      return;
+    }
+    const pct =
+      p.bytes_original > 0
+        ? ((100 * p.bytes_saved) / p.bytes_original).toFixed(0)
+        : "0";
+    pendingSavingsEl.classList.remove("hidden");
+    pendingSavingsEl.innerHTML = `
+      <div><strong>Si vous remplacez les originaux</strong> — ${p.files} fichier(s)</div>
+      <div>${formatSize(p.bytes_original)} → ${formatSize(p.bytes_encoded)} ·
+        <strong>économie ${formatSaved(p.bytes_saved)}</strong> (${pct}%)</div>
+    `;
+  } catch (_) {
+    pendingSavingsEl.classList.add("hidden");
+  }
+}
+
+function applyTheme(theme) {
+  const t = theme === "light" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", t);
+  try {
+    localStorage.setItem("jaj-theme", t);
+  } catch (_) {}
+  if (themeSelect) themeSelect.value = t;
+}
+
+function initTheme() {
+  let saved = "dark";
+  try {
+    saved = localStorage.getItem("jaj-theme") || "dark";
+  } catch (_) {}
+  applyTheme(saved);
+  if (themeSelect) {
+    themeSelect.addEventListener("change", () => applyTheme(themeSelect.value));
+  }
 }
 
 btnEncode.addEventListener("click", async () => {
@@ -979,6 +1028,7 @@ btnStopAll.addEventListener("click", async () => {
   el.addEventListener("change", schedulePersistUi);
 });
 
+initTheme();
 loadConfig()
   .then(loadFfmpegCaps)
   .then(() => pollSession({ bootstrap: true }));

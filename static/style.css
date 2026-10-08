@@ -1,4 +1,5 @@
-:root {
+:root,
+html[data-theme="dark"] {
   --bg: #1a1d21;
   --bg-panel: #23282e;
   --bg-row: #2a3038;
@@ -10,8 +11,26 @@
   --ok: #4caf7a;
   --warn: #d4a017;
   --err: #d9534f;
+  --log-bg: #12151a;
   --radius: 6px;
   font-family: "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  --bg: #f3f5f7;
+  --bg-panel: #ffffff;
+  --bg-row: #eef1f4;
+  --border: #cfd6de;
+  --text: #1c2430;
+  --text-dim: #5c6b7a;
+  --accent: #2b7bbf;
+  --accent-hover: #1f6aad;
+  --ok: #2f8f5b;
+  --warn: #b8860b;
+  --err: #c0392b;
+  --log-bg: #e8ecf0;
+  color-scheme: light;
 }
 
 * {
@@ -66,6 +85,24 @@ header h1 {
   font-variant-numeric: tabular-nums;
 }
 
+.theme-toggle {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.theme-toggle select {
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-row);
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
 .savings-recap {
   margin-top: 1rem;
   padding: 0.85rem 1rem;
@@ -74,6 +111,11 @@ header h1 {
   border-radius: var(--radius);
   font-size: 0.9rem;
   line-height: 1.45;
+}
+
+.pending-savings {
+  border-style: dashed;
+  margin-top: 0.75rem;
 }
 
 .savings-recap strong {
@@ -282,15 +324,15 @@ main {
 }
 
 .badge-remux {
-  background: #1e3d2f;
-  color: #6dcea0;
-  border: 1px solid #2f6b4a;
+  background: color-mix(in srgb, var(--ok) 18%, var(--bg-row));
+  color: var(--ok);
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--border));
 }
 
 .badge-encode {
-  background: #3d321e;
-  color: #e0c06d;
-  border: 1px solid #6b5a2f;
+  background: color-mix(in srgb, var(--warn) 18%, var(--bg-row));
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
 }
 
 .file-opts select.opt-mode {
@@ -459,13 +501,13 @@ main {
   max-height: 220px;
   overflow: auto;
   padding: 0.65rem 0.75rem;
-  background: #12151a;
+  background: var(--log-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
   font-size: 0.72rem;
   line-height: 1.35;
-  color: #b8c0c8;
+  color: var(--text-dim);
   white-space: pre-wrap;
   word-break: break-all;
 }

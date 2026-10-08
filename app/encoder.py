@@ -1093,6 +1093,43 @@ def list_completed_for_replace(batch_id: str | None = None) -> list[dict[str, st
     return rows
 
 
+def preview_replace_savings(batch_id: str | None = None) -> dict[str, Any]:
+    """Économie d'espace si on remplace les originaux (sans rien supprimer)."""
+    items = list_completed_for_replace(batch_id)
+    files = 0
+    bytes_original = 0
+    bytes_encoded = 0
+    details: list[dict[str, Any]] = []
+    for it in items:
+        src = Path(it.get("source") or "")
+        final = Path(it.get("output_final") or "")
+        if not src.is_file() or not final.is_file():
+            continue
+        try:
+            orig = src.stat().st_size
+            enc = final.stat().st_size
+        except OSError:
+            continue
+        files += 1
+        bytes_original += orig
+        bytes_encoded += enc
+        details.append(
+            {
+                "source": str(src),
+                "bytes_original": orig,
+                "bytes_encoded": enc,
+                "bytes_saved": orig - enc,
+            }
+        )
+    return {
+        "files": files,
+        "bytes_original": bytes_original,
+        "bytes_encoded": bytes_encoded,
+        "bytes_saved": bytes_original - bytes_encoded,
+        "details": details,
+    }
+
+
 async def _batch_worker() -> None:
     """Dispatch jusqu'à MAX_CONCURRENT_JOBS encodages en parallèle."""
     active: set[asyncio.Task[None]] = set()

@@ -23,6 +23,7 @@ from app.encoder import (
     global_batch_view,
     jobs_status,
     list_completed_for_replace,
+    preview_replace_savings,
     probe_ffmpeg,
     probe_gpu,
     start_batch,
@@ -268,6 +269,12 @@ def _resolve_under_work(path_str: str, work_dir: str) -> Path:
     except ValueError as e:
         raise HTTPException(status_code=400, detail="Chemin hors du répertoire de travail") from e
     return target
+
+
+@app.get("/api/replace/preview")
+def replace_preview(batch_id: str | None = None):
+    """Économie potentielle si on remplace les originaux (lecture seule)."""
+    return preview_replace_savings(batch_id)
 
 
 @app.post("/api/replace")

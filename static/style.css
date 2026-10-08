@@ -85,8 +85,8 @@ header h1 {
   font-variant-numeric: tabular-nums;
 }
 
+.header-select,
 .theme-toggle {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -94,6 +94,16 @@ header h1 {
   font-size: 0.8rem;
 }
 
+.theme-toggle {
+  margin-left: auto;
+}
+
+.header-select-label,
+.theme-label {
+  white-space: nowrap;
+}
+
+.header-select select,
 .theme-toggle select {
   padding: 0.25rem 0.4rem;
   border: 1px solid var(--border);
@@ -101,6 +111,7 @@ header h1 {
   background: var(--bg-row);
   color: var(--text);
   font-size: 0.8rem;
+  min-width: 3rem;
 }
 
 .savings-recap {

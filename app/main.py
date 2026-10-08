@@ -20,12 +20,14 @@ from app.encoder import (
     ensure_worker,
     generate_thumbnail,
     get_batch,
+    get_concurrency,
     global_batch_view,
     jobs_status,
     list_completed_for_replace,
     preview_replace_savings,
     probe_ffmpeg,
     probe_gpu,
+    set_concurrency,
     start_batch,
     stop_all_jobs,
 )
@@ -78,6 +80,11 @@ class RowStateRequest(BaseModel):
     ui_filters: dict | None = None
 
 
+class ConcurrencyRequest(BaseModel):
+    max_nvenc: int | None = Field(default=None, ge=1, le=64)
+    max_remux: int | None = Field(default=None, ge=1, le=64)
+
+
 def _resolve_allowed(path_str: str, work_dir: str | None = None) -> Path:
     settings = get_settings()
     base = Path(work_dir or settings.work_dir).resolve()
@@ -121,7 +128,18 @@ def config():
         "ld_library_path": settings.ld_library_path,
         "extensions": ",".join(sorted(settings.extension_set())),
         "port": settings.port,
+        "concurrency": get_concurrency(),
     }
+
+
+@app.get("/api/concurrency")
+def api_get_concurrency():
+    return get_concurrency()
+
+
+@app.put("/api/concurrency")
+def api_put_concurrency(body: ConcurrencyRequest):
+    return set_concurrency(max_nvenc=body.max_nvenc, max_remux=body.max_remux)
 
 
 @app.get("/api/session")

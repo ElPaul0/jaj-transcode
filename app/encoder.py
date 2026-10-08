@@ -90,19 +90,158 @@ class EncodeBatch:
 _batches: dict[str, EncodeBatch] = {}
 _batch_lock = asyncio.Lock()
 _worker_task: asyncio.Task | None = None
-MAX_CONCURRENT_JOBS = 2
+
+# Limites runtime (persistées) — séparées encode NVENC / remux
+_runtime_max_nvenc: int | None = None
+_runtime_max_remux: int | None = None
 
 
 class CapacityError(Exception):
-    """Conservé pour compat ; la file n'est plus bloquée — max 2 en parallèle côté worker."""
+    """Conservé pour compat ; la file n'est plus bloquée — worker cap séparé NVENC/remux."""
 
-    def __init__(self, running: int, limit: int = MAX_CONCURRENT_JOBS):
+    def __init__(self, running: int, limit: int = 2):
         self.running = running
         self.limit = limit
         super().__init__(
             f"Déjà {running} encodage(s) en cours (max {limit}). "
             "Les nouveaux jobs sont mis en file."
         )
+
+
+def _concurrency_path() -> Path:
+    return _state_dir() / "concurrency.json"
+
+
+def infer_nvenc_session_limit(gpu_name: str) -> int:
+    """Plafond de sessions NVENC simultanées selon le GPU (heuristique NVIDIA)."""
+    name = (gpu_name or "").lower()
+    if not name:
+        return 2
+    pro_markers = (
+        "quadro",
+        "tesla",
+        "grid",
+        "nvs ",
+        "rtx a",
+        "rtx 4000",
+        "rtx 5000",
+        "rtx 6000",
+        "rtx 8000",
+        "a100",
+        "a40",
+        "a30",
+        "a16",
+        "a10",
+        "a6000",
+        "a5000",
+        "a4500",
+        "a4000",
+        "a2000",
+        "l40",
+        "l4",
+        "h100",
+        "h800",
+        "t4",
+        "v100",
+        "p40",
+        "p100",
+        "p6",
+        "p4",
+    )
+    if any(m in name for m in pro_markers):
+        return 8
+    # GeForce / RTX grand public : limite logicielle NVIDIA (souvent 2, parfois 5)
+    # Pascal / Maxwell / Kepler restent typiquement à 2 (ex. GTX 1070).
+    if any(g in name for g in ("gtx 16", "rtx 20", "rtx 30", "rtx 40", "rtx 50")):
+        return 5
+    if "geforce" in name or "gtx" in name or "rtx" in name:
+        return 2
+    return 2
+
+
+_nvenc_cap_cache: tuple[int, str] | None = None
+
+
+def detected_nvenc_cap(*, refresh: bool = False) -> tuple[int, str]:
+    """Retourne (plafond, nom GPU). JAJ_MAX_NVENC_CAP>0 force le plafond."""
+    global _nvenc_cap_cache
+    settings = get_settings()
+    forced = int(settings.max_nvenc_cap or 0)
+    if _nvenc_cap_cache is None or refresh:
+        gpu = probe_gpu()
+        name = ""
+        if gpu.get("available") and gpu.get("gpus"):
+            name = str(gpu["gpus"][0].get("name") or "")
+        auto = infer_nvenc_session_limit(name) if name else 2
+        _nvenc_cap_cache = (max(1, auto), name)
+    auto_cap, name = _nvenc_cap_cache
+    cap = max(1, forced) if forced > 0 else auto_cap
+    return cap, name
+
+
+def _load_concurrency_file() -> dict[str, int]:
+    path = _concurrency_path()
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def _save_concurrency_file(max_nvenc: int, max_remux: int) -> None:
+    path = _concurrency_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"max_nvenc": max_nvenc, "max_remux": max_remux}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def get_concurrency() -> dict[str, Any]:
+    """Limites courantes + plafonds UI."""
+    global _runtime_max_nvenc, _runtime_max_remux
+    settings = get_settings()
+    nvenc_cap, gpu_name = detected_nvenc_cap()
+    remux_cap = max(1, int(settings.max_remux_cap or 8))
+
+    if _runtime_max_nvenc is None or _runtime_max_remux is None:
+        stored = _load_concurrency_file()
+        def_nv = int(settings.default_max_nvenc or 2)
+        def_rm = int(settings.default_max_remux or 2)
+        _runtime_max_nvenc = int(stored.get("max_nvenc", def_nv))
+        _runtime_max_remux = int(stored.get("max_remux", def_rm))
+
+    max_nvenc = max(1, min(int(_runtime_max_nvenc), nvenc_cap))
+    max_remux = max(1, min(int(_runtime_max_remux), remux_cap))
+    _runtime_max_nvenc = max_nvenc
+    _runtime_max_remux = max_remux
+
+    return {
+        "max_nvenc": max_nvenc,
+        "max_remux": max_remux,
+        "max_nvenc_cap": nvenc_cap,
+        "max_remux_cap": remux_cap,
+        "gpu_name": gpu_name,
+        "max_concurrent": max_nvenc + max_remux,
+    }
+
+
+def set_concurrency(max_nvenc: int | None = None, max_remux: int | None = None) -> dict[str, Any]:
+    """Met à jour les limites runtime (clampées) et persiste."""
+    global _runtime_max_nvenc, _runtime_max_remux
+    cur = get_concurrency()
+    nvenc_cap = int(cur["max_nvenc_cap"])
+    remux_cap = int(cur["max_remux_cap"])
+    if max_nvenc is not None:
+        _runtime_max_nvenc = max(1, min(int(max_nvenc), nvenc_cap))
+    if max_remux is not None:
+        _runtime_max_remux = max(1, min(int(max_remux), remux_cap))
+    _save_concurrency_file(int(_runtime_max_nvenc), int(_runtime_max_remux))
+    return get_concurrency()
 
 
 def count_jobs_by_state(*states: JobState) -> int:
@@ -114,16 +253,39 @@ def count_jobs_by_state(*states: JobState) -> int:
     return n
 
 
+def count_running_by_kind(kind: str) -> int:
+    n = 0
+    for batch in _batches.values():
+        for job in batch.jobs:
+            if job.state == JobState.RUNNING and _job_kind(job) == kind:
+                n += 1
+    return n
+
+
+def _job_kind(job: EncodeJob) -> str:
+    return "remux" if _want_remux(job) else "encode"
+
+
 def jobs_status() -> dict[str, Any]:
+    conc = get_concurrency()
     running = count_jobs_by_state(JobState.RUNNING)
     queued = count_jobs_by_state(JobState.QUEUED)
+    running_encode = count_running_by_kind("encode")
+    running_remux = count_running_by_kind("remux")
+    max_nvenc = int(conc["max_nvenc"])
+    max_remux = int(conc["max_remux"])
     return {
         "running": running,
+        "running_encode": running_encode,
+        "running_remux": running_remux,
         "queued": queued,
-        "max_concurrent": MAX_CONCURRENT_JOBS,
-        # Toujours possible d'enfiler ; le worker limite le parallèle
+        "max_nvenc": max_nvenc,
+        "max_remux": max_remux,
+        "max_nvenc_cap": conc["max_nvenc_cap"],
+        "max_remux_cap": conc["max_remux_cap"],
+        "max_concurrent": conc["max_concurrent"],
         "can_start": True,
-        "can_run_now": running < MAX_CONCURRENT_JOBS,
+        "can_run_now": running_encode < max_nvenc or running_remux < max_remux,
     }
 
 
@@ -354,6 +516,7 @@ def probe_ffmpeg() -> dict[str, Any]:
 
 
 def probe_gpu() -> dict[str, Any]:
+    global _nvenc_cap_cache
     try:
         r = subprocess.run(
             ["nvidia-smi", "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"],
@@ -362,7 +525,11 @@ def probe_gpu() -> dict[str, Any]:
             timeout=10,
         )
         if r.returncode != 0:
-            return {"available": False, "error": (r.stderr or r.stdout).strip()}
+            return {
+                "available": False,
+                "error": (r.stderr or r.stdout).strip(),
+                "nvenc_session_limit": 2,
+            }
         lines = [ln.strip() for ln in r.stdout.strip().splitlines() if ln.strip()]
         gpus = []
         for ln in lines:
@@ -374,11 +541,21 @@ def probe_gpu() -> dict[str, Any]:
                     "memory": parts[2] if len(parts) > 2 else "",
                 }
             )
-        return {"available": True, "gpus": gpus}
+        name0 = gpus[0]["name"] if gpus else ""
+        settings = get_settings()
+        forced = int(settings.max_nvenc_cap or 0)
+        auto = infer_nvenc_session_limit(name0) if name0 else 2
+        nvenc_cap = max(1, forced) if forced > 0 else max(1, auto)
+        _nvenc_cap_cache = (max(1, auto), name0)
+        return {
+            "available": True,
+            "gpus": gpus,
+            "nvenc_session_limit": nvenc_cap,
+        }
     except FileNotFoundError:
-        return {"available": False, "error": "nvidia-smi introuvable"}
+        return {"available": False, "error": "nvidia-smi introuvable", "nvenc_session_limit": 2}
     except subprocess.TimeoutExpired:
-        return {"available": False, "error": "nvidia-smi timeout"}
+        return {"available": False, "error": "nvidia-smi timeout", "nvenc_session_limit": 2}
 
 
 def _run_cmd(cmd: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -1051,7 +1228,7 @@ async def start_batch(sources: list[str], options_map: dict[str, FileEncodeOptio
         jobs.append(EncodeJob(id=str(uuid.uuid4()), source=src, options=opts))
     batch = EncodeBatch(batch_id=batch_id, jobs=jobs)
     async with _batch_lock:
-        # Toujours enfiler ; le worker cap à MAX_CONCURRENT_JOBS
+        # Toujours enfiler ; le worker cap NVENC / remux séparément
         _batches[batch_id] = batch
         mark_jobs_dirty()
         save_jobs(force=True)
@@ -1131,25 +1308,46 @@ def preview_replace_savings(batch_id: str | None = None) -> dict[str, Any]:
 
 
 async def _batch_worker() -> None:
-    """Dispatch jusqu'à MAX_CONCURRENT_JOBS encodages en parallèle."""
+    """Dispatch encode NVENC et remux avec plafonds séparés."""
     active: set[asyncio.Task[None]] = set()
+    task_kind: dict[asyncio.Task[None], str] = {}
 
     while True:
-        # nettoyer les tâches finies
         done = {t for t in active if t.done()}
         for t in done:
             active.discard(t)
+            task_kind.pop(t, None)
             try:
                 t.result()
             except Exception:
                 pass
 
-        while len(active) < MAX_CONCURRENT_JOBS:
-            picked = _claim_next_job()
+        conc = get_concurrency()
+        max_nvenc = int(conc["max_nvenc"])
+        max_remux = int(conc["max_remux"])
+        running_encode = sum(1 for k in task_kind.values() if k == "encode")
+        running_remux = sum(1 for k in task_kind.values() if k == "remux")
+
+        # Remplir d'abord les slots libres (encode puis remux) sans bloquer l'autre type
+        while running_encode < max_nvenc:
+            picked = _claim_next_job(kind="encode")
             if not picked:
                 break
             job, batch = picked
-            active.add(asyncio.create_task(_run_claimed_job(job, batch)))
+            t = asyncio.create_task(_run_claimed_job(job, batch))
+            active.add(t)
+            task_kind[t] = "encode"
+            running_encode += 1
+
+        while running_remux < max_remux:
+            picked = _claim_next_job(kind="remux")
+            if not picked:
+                break
+            job, batch = picked
+            t = asyncio.create_task(_run_claimed_job(job, batch))
+            active.add(t)
+            task_kind[t] = "remux"
+            running_remux += 1
 
         _refresh_batch_running_flags()
         save_jobs(force=False)
@@ -1159,17 +1357,20 @@ async def _batch_worker() -> None:
         await asyncio.sleep(0.25)
 
 
-def _claim_next_job() -> tuple[EncodeJob, EncodeBatch] | None:
+def _claim_next_job(*, kind: str | None = None) -> tuple[EncodeJob, EncodeBatch] | None:
     for batch in _batches.values():
         for job in batch.jobs:
-            if job.state == JobState.QUEUED:
-                job.state = JobState.RUNNING
-                job.message = "Encodage…"
-                job.phase = "Démarrage…"
-                batch.running = True
-                mark_jobs_dirty()
-                save_jobs(force=True)
-                return job, batch
+            if job.state != JobState.QUEUED:
+                continue
+            if kind is not None and _job_kind(job) != kind:
+                continue
+            job.state = JobState.RUNNING
+            job.message = "Remux…" if _job_kind(job) == "remux" else "Encodage…"
+            job.phase = "Démarrage…"
+            batch.running = True
+            mark_jobs_dirty()
+            save_jobs(force=True)
+            return job, batch
     return None
 
 

@@ -4,15 +4,23 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>jaj-transcode</title>
-  <link rel="stylesheet" href="/static/style.css?v=9efd4f8">
+  <link rel="stylesheet" href="/static/style.css?v=a1c2conc">
 </head>
 <body>
   <header>
     <h1>jaj-transcode</h1>
     <span id="gpu-badge" class="badge">GPU…</span>
     <span id="ffmpeg-badge" class="badge"></span>
-    <span id="jobs-badge" class="badge">Jobs: 0/2</span>
+    <span id="jobs-badge" class="badge">Jobs: —</span>
     <span id="savings-badge" class="badge" title="Économies après remplacement des originaux">Économisé: —</span>
+    <label class="header-select" title="Jobs NVENC simultanés (plafond = limite GPU)">
+      <span class="header-select-label">NVENC</span>
+      <select id="max-nvenc-select" aria-label="Max jobs NVENC"></select>
+    </label>
+    <label class="header-select" title="Jobs remux simultanés (plafond configurable via JAJ_MAX_REMUX_CAP)">
+      <span class="header-select-label">Remux</span>
+      <select id="max-remux-select" aria-label="Max jobs remux"></select>
+    </label>
     <label class="theme-toggle" title="Thème">
       <span class="theme-label">Thème</span>
       <select id="theme-select" aria-label="Thème clair ou sombre">
@@ -132,6 +140,6 @@
     </div>
   </main>
 
-  <script src="/static/app.js?v=9efd4f8"></script>
+  <script src="/static/app.js?v=a1c2conc"></script>
 </body>
 </html>

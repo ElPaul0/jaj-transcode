@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     extensions: str = ",".join(DEFAULT_EXTENSIONS)
     tmp_suffix: str = ".jajtmp.mp4"
     thumb_seek: str = "00:00:05"
+    # Plafond UI remux (sélecteur 1..N) — monter via JAJ_MAX_REMUX_CAP
+    max_remux_cap: int = 8
+    # Plafond UI NVENC : 0 = auto (détection GPU), sinon force ce plafond
+    max_nvenc_cap: int = 0
+    # Valeurs par défaut des sélecteurs (clampées aux plafonds)
+    default_max_nvenc: int = 2
+    default_max_remux: int = 2
 
     def ffmpeg_env(self) -> dict[str, str]:
         env = os.environ.copy()

@@ -20,6 +20,8 @@ const finalizeHint = document.getElementById("finalize-hint");
 const savingsRecapEl = document.getElementById("savings-recap");
 const pendingSavingsEl = document.getElementById("pending-savings");
 const themeSelect = document.getElementById("theme-select");
+const maxNvencSelect = document.getElementById("max-nvenc-select");
+const maxRemuxSelect = document.getElementById("max-remux-select");
 const bulkBar = document.getElementById("bulk-bar");
 const bulkCount = document.getElementById("bulk-count");
 const bulkCq = document.getElementById("bulk-cq");
@@ -519,6 +521,7 @@ async function loadConfig() {
   const cfg = await api("/api/config");
   if (!workDirEl.value) workDirEl.value = cfg.work_dir;
   ffmpegBadge.textContent = cfg.ffmpeg;
+  if (cfg.concurrency) applyConcurrencyUi(cfg.concurrency);
 }
 
 async function loadFfmpegCaps() {
@@ -537,7 +540,11 @@ async function loadGpu() {
   try {
     const g = await api("/api/gpu");
     if (g.available && g.gpus && g.gpus.length) {
-      gpuBadge.textContent = `GPU: ${g.gpus[0].name}`;
+      const lim = g.nvenc_session_limit;
+      gpuBadge.textContent =
+        lim != null
+          ? `GPU: ${g.gpus[0].name} · NVENC×${lim}`
+          : `GPU: ${g.gpus[0].name}`;
       gpuBadge.classList.add("ok");
     } else {
       gpuBadge.textContent = g.error || "GPU indisponible";
@@ -551,15 +558,70 @@ async function loadGpu() {
 
 function updateJobsBadge(status) {
   if (!jobsBadge || !status) return;
-  const r = status.running || 0;
+  const re = status.running_encode ?? 0;
+  const rr = status.running_remux ?? 0;
+  const r = status.running || re + rr;
   const q = status.queued || 0;
-  const max = status.max_concurrent || 2;
-  jobsBadge.textContent =
-    q > 0 ? `Jobs: ${r}/${max} (+${q} file)` : `Jobs: ${r}/${max}`;
+  const maxE = status.max_nvenc || 2;
+  const maxR = status.max_remux || 2;
+  const base = `NVENC ${re}/${maxE} · Remux ${rr}/${maxR}`;
+  jobsBadge.textContent = q > 0 ? `${base} (+${q} file)` : base;
+  jobsBadge.title = `${r} job(s) actif(s)`;
   jobsBadge.classList.toggle("ok", r > 0);
-  jobsBadge.classList.toggle("err", r >= max);
+  jobsBadge.classList.toggle("err", re >= maxE && rr >= maxR && q > 0);
   encodeBusy = r > 0 || q > 0;
   if (btnStopAll) btnStopAll.classList.toggle("hidden", !encodeBusy);
+}
+
+function fillConcurrencySelect(selectEl, selected, cap) {
+  if (!selectEl) return;
+  const c = Math.max(1, Number(cap) || 1);
+  const cur = Math.max(1, Math.min(Number(selected) || 1, c));
+  selectEl.innerHTML = "";
+  for (let i = 1; i <= c; i++) {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = String(i);
+    selectEl.appendChild(opt);
+  }
+  selectEl.value = String(cur);
+}
+
+function applyConcurrencyUi(conc) {
+  if (!conc) return;
+  fillConcurrencySelect(maxNvencSelect, conc.max_nvenc, conc.max_nvenc_cap);
+  fillConcurrencySelect(maxRemuxSelect, conc.max_remux, conc.max_remux_cap);
+  if (maxNvencSelect) {
+    maxNvencSelect.title = `Max jobs NVENC (plafond GPU: ${conc.max_nvenc_cap}${conc.gpu_name ? " — " + conc.gpu_name : ""})`;
+  }
+  if (maxRemuxSelect) {
+    maxRemuxSelect.title = `Max jobs remux (plafond: ${conc.max_remux_cap}, JAJ_MAX_REMUX_CAP)`;
+  }
+}
+
+async function loadConcurrency() {
+  try {
+    const conc = await api("/api/concurrency");
+    applyConcurrencyUi(conc);
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+async function saveConcurrencyFromUi() {
+  if (!maxNvencSelect || !maxRemuxSelect) return;
+  try {
+    const conc = await api("/api/concurrency", {
+      method: "PUT",
+      body: JSON.stringify({
+        max_nvenc: Number(maxNvencSelect.value),
+        max_remux: Number(maxRemuxSelect.value),
+      }),
+    });
+    applyConcurrencyUi(conc);
+  } catch (e) {
+    alert(`Concurrence: ${e.message}`);
+  }
 }
 
 function applyScanFromSession(scan, rows) {
@@ -1029,7 +1091,10 @@ btnStopAll.addEventListener("click", async () => {
 });
 
 initTheme();
+if (maxNvencSelect) maxNvencSelect.addEventListener("change", saveConcurrencyFromUi);
+if (maxRemuxSelect) maxRemuxSelect.addEventListener("change", saveConcurrencyFromUi);
 loadConfig()
+  .then(loadConcurrency)
   .then(loadFfmpegCaps)
   .then(() => pollSession({ bootstrap: true }));
 loadGpu();

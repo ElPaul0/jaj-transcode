@@ -1,5 +1,6 @@
 const workDirEl = document.getElementById("work-dir");
 const btnScan = document.getElementById("btn-scan");
+const btnDedup = document.getElementById("btn-dedup");
 const btnSelectAll = document.getElementById("btn-select-all");
 const btnSelectNone = document.getElementById("btn-select-none");
 const btnEncode = document.getElementById("btn-encode");
@@ -91,28 +92,54 @@ function renderRunSavings(run, total) {
     savingsRecapEl.classList.add("hidden");
     return;
   }
+  const isDedup = run.kind === "dedup";
   const pct =
-    run.bytes_original > 0
+    !isDedup && run.bytes_original > 0
       ? ((100 * run.bytes_saved) / run.bytes_original).toFixed(0)
-      : "0";
+      : null;
   const lines = (run.details || [])
     .slice(0, 40)
     .map((d) => {
       const name = (d.source || "").split(/[/\\]/).pop();
+      if (isDedup) return `· ${name}: ${formatSaved(d.bytes_saved)}`;
       return `· ${name}: ${formatSize(d.bytes_original)} → ${formatSize(d.bytes_encoded)} (${formatSaved(d.bytes_saved)})`;
     });
   const more =
     (run.details || []).length > 40
       ? `\n· … +${run.details.length - 40} autre(s)`
       : "";
+  const title = isDedup
+    ? `Récap dédoublonnage — ${run.files_replaced} doublon(s) supprimé(s)`
+    : `Récap run — ${run.files_replaced} original(aux) remplacé(s)`;
+  const line = isDedup
+    ? `<div><strong>${formatSaved(run.bytes_saved)}</strong> libérés</div>`
+    : `<div>${formatSize(run.bytes_original)} → ${formatSize(run.bytes_encoded)} · <strong>${formatSaved(run.bytes_saved)}</strong>${pct != null ? ` (${pct}%)` : ""}</div>`;
   savingsRecapEl.classList.remove("hidden");
   savingsRecapEl.innerHTML = `
-    <div><strong>Récap run</strong> — ${run.files_replaced} original(aux) remplacé(s)</div>
-    <div>${formatSize(run.bytes_original)} → ${formatSize(run.bytes_encoded)} · <strong>${formatSaved(run.bytes_saved)}</strong> (${pct}%)</div>
+    <div><strong>${title}</strong></div>
+    ${line}
     <div style="margin-top:0.4rem;color:var(--text-dim)">Cumul total: ${formatSaved((total && total.bytes_saved) || 0)} sur ${(total && total.files_replaced) || 0} fichier(s)</div>
     <pre style="margin:0.5rem 0 0;white-space:pre-wrap;font-size:0.8rem;color:var(--text-dim)">${escapeHtml(lines.join("\n") + more)}</pre>
   `;
   updateSavingsBadge(total);
+}
+
+function formatDedupPreview(data) {
+  const groups = data.groups || [];
+  const lines = groups.slice(0, 20).map((g) => {
+    const keep = (g.keep && g.keep.name) || "?";
+    const dels = (g.delete || []).map((d) => d.name).join(", ");
+    return `• garder ${keep} — supprimer: ${dels} (${formatSize(g.bytes_reclaimable)})`;
+  });
+  const more =
+    groups.length > 20 ? `\n… et ${groups.length - 20} autre(s) groupe(s)` : "";
+  return (
+    `${data.group_count || 0} groupe(s) · ${data.delete_count || 0} fichier(s) à supprimer\n` +
+    `Espace récupérable: ${formatSize(data.bytes_reclaimable || 0)}\n` +
+    `(${data.files_scanned || 0} fichiers scannés)\n\n` +
+    lines.join("\n") +
+    more
+  );
 }
 
 async function api(path, opts = {}) {
@@ -768,6 +795,55 @@ async function pollSession({ bootstrap = false } = {}) {
   } catch (e) {
     if (batchMeta) batchMeta.textContent = `Erreur sync: ${e.message}`;
   }
+}
+
+if (btnDedup) {
+  btnDedup.addEventListener("click", async () => {
+    const prev = btnDedup.textContent;
+    btnDedup.disabled = true;
+    btnDedup.textContent = "Doublons…";
+    try {
+      const data = await api("/api/dedup/scan", {
+        method: "POST",
+        body: JSON.stringify({ work_dir: workDirEl.value.trim() }),
+      });
+      if (!(data.group_count > 0) || !(data.delete_count > 0)) {
+        alert(
+          `Aucun doublon exact trouvé.\n(${data.files_scanned || 0} fichiers scannés)`
+        );
+        return;
+      }
+      const ok = confirm(
+        formatDedupPreview(data) +
+          "\n\nSupprimer les copies en trop ?\n(conserve .mp4 / noms propres / fichiers plus récents en priorité)"
+      );
+      if (!ok) return;
+      const paths = [];
+      (data.groups || []).forEach((g) => {
+        (g.delete || []).forEach((d) => {
+          if (d.path) paths.push(d.path);
+        });
+      });
+      const res = await api("/api/dedup/delete", {
+        method: "POST",
+        body: JSON.stringify({
+          paths,
+          work_dir: workDirEl.value.trim(),
+        }),
+      });
+      if (res.savings) updateSavingsBadge(res.savings);
+      if (res.run_savings) renderRunSavings(res.run_savings, res.savings);
+      alert(
+        `Dédoublonnage: ${res.deleted || 0} fichier(s) supprimé(s) · ${formatSaved(res.bytes_freed || 0)}`
+      );
+      btnScan.click();
+    } catch (e) {
+      alert(`Doublons: ${e.message}`);
+    } finally {
+      btnDedup.disabled = false;
+      btnDedup.textContent = prev;
+    }
+  });
 }
 
 btnScan.addEventListener("click", async () => {

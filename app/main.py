@@ -31,6 +31,7 @@ from app.encoder import (
     start_batch,
     stop_all_jobs,
 )
+from app.dedup import delete_duplicates, find_duplicate_groups
 from app.scanner import entry_to_dict, scan_videos
 from app import session as app_session
 
@@ -83,6 +84,15 @@ class RowStateRequest(BaseModel):
 class ConcurrencyRequest(BaseModel):
     max_nvenc: int | None = Field(default=None, ge=1, le=64)
     max_remux: int | None = Field(default=None, ge=1, le=64)
+
+
+class DedupScanRequest(BaseModel):
+    work_dir: str | None = None
+
+
+class DedupDeleteRequest(BaseModel):
+    paths: list[str] = Field(default_factory=list)
+    work_dir: str | None = None
 
 
 def _resolve_allowed(path_str: str, work_dir: str | None = None) -> Path:
@@ -287,6 +297,40 @@ def _resolve_under_work(path_str: str, work_dir: str) -> Path:
     except ValueError as e:
         raise HTTPException(status_code=400, detail="Chemin hors du répertoire de travail") from e
     return target
+
+
+@app.post("/api/dedup/scan")
+def dedup_scan(body: DedupScanRequest):
+    """Détecte les doublons exacts (même taille + même hash) sous work_dir."""
+    settings = get_settings()
+    root = body.work_dir or settings.work_dir
+    if body.work_dir:
+        set_work_dir(body.work_dir)
+    try:
+        return find_duplicate_groups(root)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/dedup/delete")
+def dedup_delete(body: DedupDeleteRequest):
+    """Supprime les doublons choisis et ajoute l'espace au compteur d'économies."""
+    if not body.paths:
+        raise HTTPException(status_code=400, detail="Aucun chemin à supprimer")
+    settings = get_settings()
+    root = body.work_dir or settings.work_dir
+    # Sécurité : chaque chemin doit être sous work_dir
+    for p in body.paths:
+        _resolve_allowed(p, root)
+    results = delete_duplicates(body.paths, root)
+    savings_update = app_session.record_dedup(results)
+    return {
+        "results": results,
+        "deleted": sum(1 for r in results if r.get("deleted")),
+        "bytes_freed": sum(int(r.get("bytes") or 0) for r in results if r.get("deleted")),
+        "run_savings": savings_update.get("run"),
+        "savings": savings_update.get("total") or app_session.get_savings(),
+    }
 
 
 @app.get("/api/replace/preview")

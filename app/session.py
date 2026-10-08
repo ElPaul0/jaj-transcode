@@ -195,6 +195,7 @@ def record_replacements(items: list[dict[str, Any]]) -> dict[str, Any]:
             _savings["bytes_saved"] = int(_savings.get("bytes_saved") or 0) + run_saved
             _savings["last_run"] = {
                 "at": time.time(),
+                "kind": "replace",
                 "files_replaced": run_files,
                 "bytes_original": run_orig,
                 "bytes_encoded": run_enc,
@@ -211,6 +212,56 @@ def record_replacements(items: list[dict[str, Any]]) -> dict[str, Any]:
             "last_run": dict(_savings["last_run"]) if isinstance(_savings.get("last_run"), dict) else None,
         }
         run = total["last_run"] if run_files else {
+            "kind": "replace",
+            "files_replaced": 0,
+            "bytes_original": 0,
+            "bytes_encoded": 0,
+            "bytes_saved": 0,
+            "details": [],
+        }
+        return {"run": run, "total": total}
+
+
+def record_dedup(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Enregistre l'espace libéré par suppression de doublons (contenu identique)."""
+    global _savings
+    run_files = 0
+    run_saved = 0
+    details: list[dict[str, Any]] = []
+    for it in items:
+        if not it.get("deleted"):
+            continue
+        saved = int(it.get("bytes") or 0)
+        run_files += 1
+        run_saved += saved
+        details.append(
+            {
+                "source": it.get("path", ""),
+                "bytes_original": saved,
+                "bytes_encoded": 0,
+                "bytes_saved": saved,
+            }
+        )
+    with _lock:
+        if run_files:
+            _savings["files_replaced"] = int(_savings.get("files_replaced") or 0) + run_files
+            _savings["bytes_original"] = int(_savings.get("bytes_original") or 0) + run_saved
+            # bytes_encoded inchangé (pas de fichier de remplacement)
+            _savings["bytes_saved"] = int(_savings.get("bytes_saved") or 0) + run_saved
+            _savings["last_run"] = {
+                "at": time.time(),
+                "kind": "dedup",
+                "files_replaced": run_files,
+                "bytes_original": run_saved,
+                "bytes_encoded": 0,
+                "bytes_saved": run_saved,
+                "details": details,
+            }
+            _bump()
+            _save_unlocked(force=True)
+        total = get_savings()
+        run = total.get("last_run") if run_files else {
+            "kind": "dedup",
             "files_replaced": 0,
             "bytes_original": 0,
             "bytes_encoded": 0,

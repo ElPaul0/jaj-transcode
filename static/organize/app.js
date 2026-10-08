@@ -3,14 +3,14 @@ const btnScan = document.getElementById("btn-scan");
 const btnStop = document.getElementById("btn-stop");
 const btnApply = document.getElementById("btn-apply");
 const btnDismiss = document.getElementById("btn-dismiss");
+const btnToggleMaybe = document.getElementById("btn-toggle-maybe");
 const scanMeta = document.getElementById("scan-meta");
 const summaryEl = document.getElementById("summary");
-const folderSection = document.getElementById("folder-section");
-const folderList = document.getElementById("folder-list");
-const similarSection = document.getElementById("similar-section");
-const similarList = document.getElementById("similar-list");
-const fileSection = document.getElementById("file-section");
-const fileList = document.getElementById("file-list");
+const cleanSection = document.getElementById("clean-section");
+const cleanList = document.getElementById("clean-list");
+const maybeSection = document.getElementById("maybe-section");
+const maybeBody = document.getElementById("maybe-body");
+const maybeList = document.getElementById("maybe-list");
 const logEl = document.getElementById("log");
 const actionsEl = document.getElementById("actions");
 const actionsMeta = document.getElementById("actions-meta");
@@ -22,8 +22,8 @@ const themeSelect = document.getElementById("theme-select");
 let jobId = null;
 let pollTimer = null;
 let lastResult = null;
-/** @type {Set<string>} */
-const selectedDeletes = new Set();
+/** @type {Map<string, "file"|"folder">} */
+const selectedDeletes = new Map();
 
 function formatSize(bytes) {
   const n = Math.abs(Number(bytes) || 0);
@@ -34,15 +34,20 @@ function formatSize(bytes) {
 }
 
 function formatSaved(bytes) {
-  const n = Number(bytes) || 0;
-  return `−${formatSize(Math.abs(n))}`;
+  return `−${formatSize(Math.abs(Number(bytes) || 0))}`;
 }
 
 function escapeHtml(s) {
   return String(s || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function fmtDate(ts) {
+  if (!ts) return "—";
+  return new Date(ts * 1000).toLocaleString();
 }
 
 function applyTheme(t) {
@@ -102,141 +107,174 @@ function clearResults() {
   lastResult = null;
   selectedDeletes.clear();
   summaryEl.classList.add("hidden");
-  folderSection.classList.add("hidden");
-  similarSection.classList.add("hidden");
-  fileSection.classList.add("hidden");
-  folderList.innerHTML = "";
-  similarList.innerHTML = "";
-  fileList.innerHTML = "";
+  cleanSection.classList.add("hidden");
+  maybeSection.classList.add("hidden");
+  maybeBody.classList.add("hidden");
+  cleanList.innerHTML = "";
+  maybeList.innerHTML = "";
   actionsEl.classList.add("hidden");
 }
 
-function toggleSel(path, on) {
-  if (on) selectedDeletes.add(path);
-  else selectedDeletes.delete(path);
-  refreshActionsMeta();
-}
-
 function refreshActionsMeta() {
-  if (!lastResult) {
+  if (!lastResult || !selectedDeletes.size) {
     actionsEl.classList.add("hidden");
     return;
   }
   let bytes = 0;
-  const folders = new Set();
-  (lastResult.folder_groups || []).forEach((g) => {
-    (g.delete || []).forEach((d) => {
-      if (selectedDeletes.has(d.path)) {
-        bytes += d.bytes_total || 0;
-        folders.add(d.path);
-      }
-    });
+  let nFolders = 0;
+  let nFiles = 0;
+  selectedDeletes.forEach((kind, path) => {
+    if (kind === "folder") {
+      nFolders += 1;
+      (lastResult.folder_groups || []).forEach((g) => {
+        (g.delete || []).forEach((d) => {
+          if (d.path === path) bytes += d.bytes_total || 0;
+        });
+      });
+    } else {
+      nFiles += 1;
+      (lastResult.file_groups || []).forEach((g) => {
+        (g.delete || []).forEach((d) => {
+          if (d.path === path) bytes += d.size || 0;
+        });
+      });
+    }
   });
-  (lastResult.file_groups || []).forEach((g) => {
-    (g.delete || []).forEach((d) => {
-      if (selectedDeletes.has(d.path)) bytes += d.size || 0;
-    });
-  });
-  const n = selectedDeletes.size;
-  if (n === 0) {
-    actionsEl.classList.add("hidden");
-    return;
-  }
   actionsEl.classList.remove("hidden");
-  actionsMeta.textContent = `${n} élément(s) sélectionné(s) · ${formatSaved(bytes)} récupérables`;
+  const bits = [];
+  if (nFolders) bits.push(`${nFolders} dossier(s)`);
+  if (nFiles) bits.push(`${nFiles} fichier(s)`);
+  actionsMeta.textContent = `${bits.join(" · ")} cochés · ${formatSaved(bytes)}`;
+}
+
+function bindPick(root) {
+  root.querySelectorAll("input.pick-cb").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const path = cb.dataset.path;
+      const kind = cb.dataset.kind === "folder" ? "folder" : "file";
+      if (cb.checked) selectedDeletes.set(path, kind);
+      else selectedDeletes.delete(path);
+      refreshActionsMeta();
+    });
+  });
+}
+
+function renderFolderCard(g) {
+  const keep = g.keep || {};
+  const card = document.createElement("div");
+  card.className = "card";
+  const delLanes = (g.delete || [])
+    .map((d) => {
+      selectedDeletes.set(d.path, "folder");
+      return `
+        <div class="lane del-lane">
+          <div class="lane-label">Supprimer</div>
+          <div>
+            <div>${d.file_count || 0} media · ${formatSize(d.bytes_total)} · maj ${fmtDate(d.mtime_max)}</div>
+            <div class="path">${escapeHtml(d.path)}</div>
+            <label class="pick"><input class="pick-cb" type="checkbox" data-kind="folder" data-path="${escapeHtml(d.path)}" checked> Inclure dans la suppression</label>
+          </div>
+        </div>`;
+    })
+    .join("");
+  card.innerHTML = `
+    <div class="card-head">📁 <strong>Dossier en double</strong> · ${g.file_count || 0} media · ${formatSize(g.bytes_total)}</div>
+    <div class="lane keep-lane">
+      <div class="lane-label">Garder</div>
+      <div>
+        <div>maj ${fmtDate(keep.mtime_max)} · ${keep.file_count || 0} media</div>
+        <div class="path">${escapeHtml(keep.path || "")}</div>
+      </div>
+    </div>
+    ${delLanes}
+  `;
+  return card;
+}
+
+function renderFileCard(g) {
+  const keep = g.keep || {};
+  const card = document.createElement("div");
+  card.className = "card";
+  const kind = g.kind === "photo" ? "📷" : "🎬";
+  const delLanes = (g.delete || [])
+    .map((d) => {
+      selectedDeletes.set(d.path, "file");
+      return `
+        <div class="lane del-lane">
+          <div class="lane-label">Supprimer</div>
+          <div>
+            <div>${formatSize(d.size)}</div>
+            <div class="path">${escapeHtml(d.path)}</div>
+            <label class="pick"><input class="pick-cb" type="checkbox" data-kind="file" data-path="${escapeHtml(d.path)}" checked> Inclure dans la suppression</label>
+          </div>
+        </div>`;
+    })
+    .join("");
+  card.innerHTML = `
+    <div class="card-head">${kind} <strong>${escapeHtml(keep.name || g.name || "fichier")}</strong> · ${formatSize(g.size)} · ${g.count}×</div>
+    <div class="lane keep-lane">
+      <div class="lane-label">Garder</div>
+      <div class="path">${escapeHtml(keep.path || "")}</div>
+    </div>
+    ${delLanes}
+  `;
+  return card;
 }
 
 function renderResult(data) {
   lastResult = data;
   selectedDeletes.clear();
-  const reclaim = (data.bytes_reclaimable || 0);
+
+  const nFolders = data.folder_group_count || 0;
+  const nFiles = data.file_group_count || 0;
+  const nMaybe = (data.similar_folders || []).length;
+  const reclaim =
+    (data.bytes_reclaimable_folders || 0) + (data.bytes_reclaimable_files || 0);
+
   summaryEl.classList.remove("hidden");
   summaryEl.innerHTML = `
-    <strong>${data.files_scanned || 0}</strong> media
-    (${data.photos || 0} photos · ${data.videos || 0} vidéos)<br>
-    Doublons fichiers: <strong>${data.file_group_count || 0}</strong> groupes
-    (${data.file_delete_count || 0} fichiers · ${formatSaved(data.bytes_reclaimable_files || 0)})<br>
-    Doublons dossiers: <strong>${data.folder_group_count || 0}</strong> groupes
-    (${data.folder_delete_count || 0} dossiers · ${formatSaved(data.bytes_reclaimable_folders || 0)})<br>
-    Total potentiel: <strong>${formatSaved(reclaim)}</strong>
+    <div class="big"><strong>${data.files_scanned || 0}</strong> media analysés
+      (${data.photos || 0} photos · ${data.videos || 0} vidéos)</div>
+    <div style="margin-top:0.4rem">
+      <strong>${nFolders}</strong> dossier(s) en double ·
+      <strong>${nFiles}</strong> fichier(s) en double ·
+      espace récupérable <strong>${formatSaved(reclaim)}</strong>
+    </div>
+    ${nMaybe ? `<div style="margin-top:0.35rem;color:var(--text-dim)">${nMaybe} cas ambigu(s) listés plus bas (pas de suppression proposée)</div>` : ""}
   `;
-  scanMeta.textContent = `Analyse de ${data.work_dir}`;
+  scanMeta.textContent = data.work_dir || "";
 
-  // Folders
-  const fgs = data.folder_groups || [];
-  if (fgs.length) {
-    folderSection.classList.remove("hidden");
-    folderList.innerHTML = "";
-    fgs.forEach((g, idx) => {
-      const keep = g.keep || {};
-      const card = document.createElement("div");
-      card.className = "card";
-      const dels = (g.delete || [])
-        .map((d) => {
-          const id = `fd-${idx}-${escapeHtml(d.path)}`;
-          selectedDeletes.add(d.path);
-          return `<label class="row"><input type="checkbox" data-path="${escapeHtml(d.path)}" data-kind="folder" checked>
-            <span class="del">Supprimer dossier<br><span class="path">${escapeHtml(d.path)}</span>
-            · ${d.file_count} fichiers · ${formatSize(d.bytes_total)} · maj ${new Date((d.mtime_max || 0) * 1000).toLocaleString()}</span></label>`;
-        })
-        .join("");
-      card.innerHTML = `
-        <div><strong>Groupe dossier</strong> · ${g.file_count} media · ${formatSize(g.bytes_total)}</div>
-        <div class="keep">✓ Garder<br><span class="path">${escapeHtml(keep.path || "")}</span>
-        · maj ${new Date((keep.mtime_max || 0) * 1000).toLocaleString()}</div>
-        ${dels}
-        <div class="meta" style="margin-top:0.35rem">${escapeHtml(g.reason || "")}</div>
+  cleanList.innerHTML = "";
+  const hasClean = nFolders > 0 || nFiles > 0;
+  if (hasClean) {
+    cleanSection.classList.remove("hidden");
+    (data.folder_groups || []).forEach((g) => cleanList.appendChild(renderFolderCard(g)));
+    (data.file_groups || []).forEach((g) => cleanList.appendChild(renderFileCard(g)));
+    bindPick(cleanList);
+  } else {
+    cleanSection.classList.add("hidden");
+  }
+
+  maybeList.innerHTML = "";
+  if (nMaybe) {
+    maybeSection.classList.remove("hidden");
+    maybeBody.classList.add("hidden");
+    btnToggleMaybe.textContent = `▸ Voir ${nMaybe} cas ambigu(s) (lecture seule)`;
+    (data.similar_folders || []).forEach((g) => {
+      const el = document.createElement("div");
+      el.className = "maybe-card";
+      el.innerHTML = `
+        <div><strong>Même fichiers, dossiers différents</strong></div>
+        <div style="margin-top:0.35rem">A · <span class="path">${escapeHtml((g.keep && g.keep.path) || "")}</span></div>
+        <div>B · <span class="path">${escapeHtml((g.other && g.other.path) || "")}</span>
+          · ${formatSize((g.other && g.other.bytes_total) || 0)}</div>
       `;
-      folderList.appendChild(card);
+      maybeList.appendChild(el);
     });
-  } else folderSection.classList.add("hidden");
+  } else {
+    maybeSection.classList.add("hidden");
+  }
 
-  // Similar
-  const sims = data.similar_folders || [];
-  if (sims.length) {
-    similarSection.classList.remove("hidden");
-    similarList.innerHTML = "";
-    sims.forEach((g) => {
-      const card = document.createElement("div");
-      card.className = "card";
-      card.innerHTML = `
-        <div class="keep">A (plus récent / propre)<br><span class="path">${escapeHtml((g.keep && g.keep.path) || "")}</span></div>
-        <div class="del" style="margin-top:0.35rem">B (similaire — non coché par défaut)<br><span class="path">${escapeHtml((g.other && g.other.path) || "")}</span>
-        · ${formatSize((g.other && g.other.bytes_total) || 0)}</div>
-        <div class="meta">${escapeHtml(g.reason || "")}</div>
-      `;
-      similarList.appendChild(card);
-    });
-  } else similarSection.classList.add("hidden");
-
-  // Files
-  const figs = data.file_groups || [];
-  if (figs.length) {
-    fileSection.classList.remove("hidden");
-    fileList.innerHTML = "";
-    figs.forEach((g, idx) => {
-      const keep = g.keep || {};
-      const card = document.createElement("div");
-      card.className = "card";
-      const dels = (g.delete || [])
-        .map((d) => {
-          selectedDeletes.add(d.path);
-          return `<label class="row"><input type="checkbox" data-path="${escapeHtml(d.path)}" data-kind="file" checked>
-            <span class="del">Supprimer<br><span class="path">${escapeHtml(d.path)}</span> · ${formatSize(d.size)}</span></label>`;
-        })
-        .join("");
-      card.innerHTML = `
-        <div><strong>${escapeHtml(keep.name || g.name)}</strong> · ${g.kind || "?"} · ${formatSize(g.size)} · ${g.count}×</div>
-        <div class="keep">✓ Garder<br><span class="path">${escapeHtml(keep.path || "")}</span></div>
-        ${dels}
-      `;
-      fileList.appendChild(card);
-    });
-  } else fileSection.classList.add("hidden");
-
-  document.querySelectorAll('input[type="checkbox"][data-path]').forEach((cb) => {
-    cb.addEventListener("change", () => toggleSel(cb.getAttribute("data-path"), cb.checked));
-  });
   refreshActionsMeta();
 }
 
@@ -256,16 +294,16 @@ async function pollStatus() {
     }
     setRunning(false);
     if (st.state === "done" && st.result) {
+      const r = st.result;
       if (
-        !(st.result.file_group_count > 0) &&
-        !(st.result.folder_group_count > 0) &&
-        !(st.result.similar_folders || []).length
+        !(r.file_group_count > 0) &&
+        !(r.folder_group_count > 0) &&
+        !(r.similar_folders || []).length
       ) {
         clearResults();
-        scanMeta.textContent = `Aucun doublon trouvé (${st.result.files_scanned || 0} media scannés).`;
-        alert(`Aucun doublon trouvé.\n(${st.result.files_scanned || 0} media)`);
+        scanMeta.textContent = `Rien à nettoyer (${r.files_scanned || 0} media).`;
       } else {
-        renderResult(st.result);
+        renderResult(r);
       }
     } else if (st.state === "error") {
       alert(`Organize: ${st.error || st.message}`);
@@ -313,28 +351,39 @@ btnStop.addEventListener("click", async () => {
 });
 
 btnDismiss.addEventListener("click", () => {
-  clearResults();
-  scanMeta.textContent = "Récap ignoré.";
+  selectedDeletes.clear();
+  cleanList.querySelectorAll("input.pick-cb").forEach((cb) => {
+    cb.checked = false;
+  });
+  refreshActionsMeta();
 });
+
+if (btnToggleMaybe) {
+  btnToggleMaybe.addEventListener("click", () => {
+    const open = !maybeBody.classList.contains("hidden");
+    maybeBody.classList.toggle("hidden", open);
+    const n = (lastResult && lastResult.similar_folders) || [];
+    btnToggleMaybe.textContent = open
+      ? `▸ Voir ${n.length} cas ambigu(s) (lecture seule)`
+      : `▾ Masquer les cas ambigus`;
+  });
+}
 
 btnApply.addEventListener("click", async () => {
   if (!selectedDeletes.size) return;
   const folderPaths = [];
   const filePaths = [];
-  (lastResult.folder_groups || []).forEach((g) => {
-    (g.delete || []).forEach((d) => {
-      if (selectedDeletes.has(d.path)) folderPaths.push(d.path);
-    });
+  selectedDeletes.forEach((kind, path) => {
+    if (kind === "folder") folderPaths.push(path);
+    else filePaths.push(path);
   });
-  (lastResult.file_groups || []).forEach((g) => {
-    (g.delete || []).forEach((d) => {
-      if (selectedDeletes.has(d.path)) filePaths.push(d.path);
-    });
-  });
-  const msg =
-    `Supprimer ${folderPaths.length} dossier(s) et ${filePaths.length} fichier(s) ?\n` +
-    `Irréversible.`;
-  if (!confirm(msg)) return;
+  if (
+    !confirm(
+      `Supprimer définitivement ?\n${folderPaths.length} dossier(s)\n${filePaths.length} fichier(s)`
+    )
+  ) {
+    return;
+  }
   btnApply.disabled = true;
   try {
     const res = await api("/api/organize/delete", {
@@ -351,8 +400,7 @@ btnApply.addEventListener("click", async () => {
       savingsBadge.classList.add("ok");
     }
     runRecap.classList.remove("hidden");
-    runRecap.innerHTML = `<strong>Dédoublonnage OK</strong> — ${res.deleted || 0} élément(s) · ${formatSaved(res.bytes_freed || 0)}`;
-    alert(`OK: ${res.deleted || 0} supprimé(s) · ${formatSaved(res.bytes_freed || 0)}`);
+    runRecap.innerHTML = `<strong>OK</strong> — ${res.deleted || 0} supprimé(s) · ${formatSaved(res.bytes_freed || 0)}`;
   } catch (e) {
     alert(`Suppression: ${e.message}`);
   } finally {

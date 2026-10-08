@@ -8,8 +8,9 @@ html[data-theme="dark"] {
   --text-dim: #9aa3ad;
   --accent: #3d8fd1;
   --ok: #4caf7a;
-  --warn: #d4a017;
+  --ok-bg: rgba(76, 175, 122, 0.12);
   --err: #d9534f;
+  --err-bg: rgba(217, 83, 79, 0.12);
   --radius: 6px;
   color-scheme: dark;
   font-family: "Segoe UI", system-ui, sans-serif;
@@ -24,8 +25,9 @@ html[data-theme="light"] {
   --text-dim: #5c6b7a;
   --accent: #2b7bbf;
   --ok: #2f8f5b;
-  --warn: #b8860b;
+  --ok-bg: rgba(47, 143, 91, 0.1);
   --err: #c0392b;
+  --err-bg: rgba(192, 57, 43, 0.08);
   color-scheme: light;
 }
 
@@ -64,10 +66,14 @@ button {
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger { border-color: var(--err); color: var(--err); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.linkish {
+  background: transparent; border: none; color: var(--accent);
+  padding: 0; text-align: left; font-size: 0.9rem; text-decoration: underline;
+}
 .hidden { display: none !important; }
 
 .layout {
-  display: grid; grid-template-columns: 1.4fr 1fr; gap: 0;
+  display: grid; grid-template-columns: 1.45fr 1fr; gap: 0;
   min-height: calc(100vh - 120px);
 }
 @media (max-width: 960px) {
@@ -75,24 +81,55 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .col { padding: 1rem 1.25rem; }
 .side { border-left: 1px solid var(--border); background: var(--bg-panel); }
-.meta { color: var(--text-dim); font-size: 0.85rem; }
+.meta, .hint { color: var(--text-dim); font-size: 0.85rem; line-height: 1.45; }
+.tag-keep { color: var(--ok); }
+.tag-del { color: var(--err); }
+
 .summary {
-  margin: 0.75rem 0; padding: 0.75rem 1rem; background: var(--bg-row);
-  border: 1px solid var(--border); border-radius: var(--radius); line-height: 1.45;
+  margin: 0.75rem 0; padding: 0.85rem 1rem; background: var(--bg-row);
+  border: 1px solid var(--border); border-radius: var(--radius); line-height: 1.5;
 }
+.summary .big { font-size: 1.05rem; }
+
 .block { margin-top: 1.25rem; }
-.block h2 { margin: 0 0 0.35rem; font-size: 1rem; }
-.list { margin-top: 0.5rem; max-height: 42vh; overflow: auto; }
+.block h2 { margin: 0 0 0.35rem; font-size: 1.05rem; }
+.block.maybe {
+  margin-top: 2rem; padding-top: 1rem; border-top: 1px dashed var(--border);
+}
+.list { margin-top: 0.65rem; max-height: 55vh; overflow: auto; }
+
 .card {
-  padding: 0.65rem 0.75rem; margin-bottom: 0.5rem; background: var(--bg-row);
-  border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.84rem;
+  padding: 0; margin-bottom: 0.75rem; background: var(--bg-row);
+  border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.86rem;
+  overflow: hidden;
 }
-.card label.row {
-  display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer;
+.card-head {
+  padding: 0.5rem 0.75rem; background: var(--bg-panel);
+  border-bottom: 1px solid var(--border); font-size: 0.8rem; color: var(--text-dim);
 }
-.keep { color: var(--ok); }
-.del { color: var(--err); }
-.path { color: var(--text-dim); word-break: break-all; font-size: 0.78rem; }
+.card-head strong { color: var(--text); }
+.lane {
+  display: grid; grid-template-columns: 4.5rem 1fr; gap: 0.5rem;
+  padding: 0.65rem 0.75rem; align-items: start;
+}
+.lane.keep-lane { background: var(--ok-bg); }
+.lane.del-lane { background: var(--err-bg); border-top: 1px solid var(--border); }
+.lane-label {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.03em;
+  text-transform: uppercase; padding-top: 0.15rem;
+}
+.keep-lane .lane-label { color: var(--ok); }
+.del-lane .lane-label { color: var(--err); }
+.path { color: var(--text-dim); word-break: break-all; font-size: 0.78rem; margin-top: 0.15rem; }
+.lane label.pick {
+  display: flex; gap: 0.45rem; align-items: flex-start; cursor: pointer; margin-top: 0.35rem;
+}
+.maybe-card {
+  padding: 0.65rem 0.75rem; margin-bottom: 0.5rem;
+  border: 1px dashed var(--border); border-radius: var(--radius); background: var(--bg);
+  font-size: 0.84rem;
+}
+
 .log {
   margin: 0; padding: 0.75rem; background: var(--bg); border: 1px solid var(--border);
   border-radius: var(--radius); min-height: 160px; max-height: 40vh; overflow: auto;

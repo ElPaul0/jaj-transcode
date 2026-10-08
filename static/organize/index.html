@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>jaj-organize</title>
-  <link rel="stylesheet" href="/static/organize/style.css?v=1">
+  <link rel="stylesheet" href="/static/organize/style.css?v=2">
 </head>
 <body>
   <header>
@@ -29,25 +29,28 @@
 
   <main class="layout">
     <section class="col">
-      <p class="meta" id="scan-meta">Choisissez un répertoire contenant photos et/ou vidéos.</p>
+      <p class="meta" id="scan-meta">Analyse photos + vidéos. On propose de supprimer uniquement les copies sûres.</p>
       <div id="summary" class="summary hidden"></div>
 
-      <div id="folder-section" class="block hidden">
-        <h2>Dossiers en double</h2>
-        <p class="meta">Même arborescence relative + tailles. Le plus récent / nom « propre » est conservé.</p>
-        <div id="folder-list" class="list"></div>
+      <div id="clean-section" class="block hidden">
+        <h2>Copies sûres — à supprimer</h2>
+        <p class="hint">
+          Même contenu détecté (mêmes noms + tailles).
+          <strong class="tag-keep">Vert = on garde</strong> ·
+          <strong class="tag-del">Rouge = copie à supprimer</strong> (coché par défaut).
+        </p>
+        <div id="clean-list" class="list"></div>
       </div>
 
-      <div id="similar-section" class="block hidden">
-        <h2>Dossiers similaires</h2>
-        <p class="meta">Même ensemble nom+taille mais chemins différents — à vérifier avant toute suppression.</p>
-        <div id="similar-list" class="list"></div>
-      </div>
-
-      <div id="file-section" class="block hidden">
-        <h2>Fichiers en double</h2>
-        <p class="meta">Même nom + même taille (photos et vidéos).</p>
-        <div id="file-list" class="list"></div>
+      <div id="maybe-section" class="block maybe hidden">
+        <button type="button" id="btn-toggle-maybe" class="linkish"></button>
+        <div id="maybe-body" class="hidden">
+          <p class="hint">
+            Même fichiers (noms + tailles) mais organisation différente.
+            <strong>Aucune suppression automatique</strong> — à ouvrir à la main si besoin.
+          </p>
+          <div id="maybe-list" class="list"></div>
+        </div>
       </div>
     </section>
 
@@ -56,13 +59,13 @@
       <pre id="log" class="log">En attente…</pre>
       <div id="actions" class="actions hidden">
         <p class="meta" id="actions-meta"></p>
-        <button type="button" id="btn-apply" class="primary">Dédoublonner la sélection</button>
-        <button type="button" id="btn-dismiss" class="danger">Tout ignorer</button>
+        <button type="button" id="btn-apply" class="primary">Supprimer les copies cochées</button>
+        <button type="button" id="btn-dismiss">Tout décocher / ignorer</button>
       </div>
       <div id="run-recap" class="recap hidden"></div>
     </aside>
   </main>
 
-  <script src="/static/organize/app.js?v=1"></script>
+  <script src="/static/organize/app.js?v=2"></script>
 </body>
 </html>

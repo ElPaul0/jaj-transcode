@@ -130,11 +130,23 @@ async function api(path, opts = {}) {
   return res;
 }
 
+function rowPath(row) {
+  return row.getAttribute("data-path") || "";
+}
+
+function pruneRowState() {
+  const keep = new Set(allFiles.map((f) => f.path));
+  for (const path of [...rowState.keys()]) {
+    if (!keep.has(path)) rowState.delete(path);
+  }
+}
+
 function countSelected() {
+  pruneRowState();
   let n = 0;
-  rowState.forEach((st) => {
-    if (st.selected) n += 1;
-  });
+  for (const f of allFiles) {
+    if (rowState.get(f.path)?.selected) n += 1;
+  }
   return n;
 }
 
@@ -148,10 +160,11 @@ function updateEncodeButton() {
 }
 
 function selectedPaths() {
+  pruneRowState();
   const paths = [];
-  rowState.forEach((st, path) => {
-    if (st.selected) paths.push(path);
-  });
+  for (const f of allFiles) {
+    if (rowState.get(f.path)?.selected) paths.push(f.path);
+  }
   return paths;
 }
 
@@ -211,15 +224,17 @@ function getRowOptions(path) {
 
 function rememberVisibleRowState() {
   fileListEl.querySelectorAll(".file-row").forEach((row) => {
-    const path = row.dataset.path;
+    const path = rowPath(row);
+    if (!path) return;
     const cb = row.querySelector('input[type="checkbox"]');
+    if (!cb) return;
     const denoise = row.querySelector(".opt-denoise").checked;
     const stabilize = row.querySelector(".opt-stabilize").checked;
     const modeSel = row.querySelector(".opt-mode");
-    let mode = modeSel ? modeSel.value : row.dataset.action === "remux" ? "remux" : "encode";
+    let mode = modeSel ? modeSel.value : row.getAttribute("data-action") === "remux" ? "remux" : "encode";
     if (denoise || stabilize) mode = "encode";
     rowState.set(path, {
-      selected: cb.checked,
+      selected: !!cb.checked,
       denoise,
       stabilize,
       cq: parseInt(row.querySelector(".opt-cq").value, 10) || 23,
@@ -364,12 +379,12 @@ function renderFiles(list) {
     };
     const row = document.createElement("div");
     row.className = "file-row";
-    row.dataset.path = f.path;
-    row.dataset.action = f.action || "encode";
+    row.setAttribute("data-path", f.path);
+    row.setAttribute("data-action", f.action || "encode");
 
     const cb = document.createElement("input");
     cb.type = "checkbox";
-    cb.checked = st.selected;
+    cb.checked = !!st.selected;
     cb.addEventListener("click", (ev) => {
       const idx = files.findIndex((x) => x.path === f.path);
       if (ev.shiftKey && lastSelectIndex != null && idx >= 0) {
@@ -391,14 +406,23 @@ function renderFiles(list) {
         }
         applyFiltersAndRender({ skipRemember: true });
         schedulePersistUi();
+        updateEncodeButton();
         return;
       }
-      // Clic simple : laisser le navigateur basculer, puis sync
       lastSelectIndex = idx >= 0 ? idx : lastSelectIndex;
     });
     cb.addEventListener("change", () => {
-      row.classList.toggle("selected", cb.checked);
-      rememberVisibleRowState();
+      const cur = rowState.get(f.path) || {
+        selected: false,
+        denoise: false,
+        stabilize: false,
+        cq: 23,
+        mode: f.action === "remux" ? "remux" : "encode",
+      };
+      cur.selected = !!cb.checked;
+      rowState.set(f.path, cur);
+      row.classList.toggle("selected", cur.selected);
+      schedulePersistUi();
       updateEncodeButton();
       const idx = files.findIndex((x) => x.path === f.path);
       if (idx >= 0) lastSelectIndex = idx;
@@ -766,22 +790,37 @@ btnScan.addEventListener("click", async () => {
 });
 
 btnSelectAll.addEventListener("click", () => {
-  fileListEl.querySelectorAll(".file-row").forEach((row) => {
-    const cb = row.querySelector('input[type="checkbox"]');
-    cb.checked = true;
-    row.classList.add("selected");
-  });
   rememberVisibleRowState();
+  const targets = files.length ? files : allFiles;
+  targets.forEach((f) => {
+    const cur = rowState.get(f.path) || {
+      selected: false,
+      denoise: false,
+      stabilize: false,
+      cq: 23,
+      mode: f.action === "remux" ? "remux" : "encode",
+    };
+    cur.selected = true;
+    rowState.set(f.path, cur);
+  });
+  applyFiltersAndRender({ skipRemember: true });
+  schedulePersistUi();
   updateEncodeButton();
 });
 
 btnSelectNone.addEventListener("click", () => {
-  fileListEl.querySelectorAll(".file-row").forEach((row) => {
-    const cb = row.querySelector('input[type="checkbox"]');
-    cb.checked = false;
-    row.classList.remove("selected");
-  });
   rememberVisibleRowState();
+  const targets = files.length ? files : allFiles;
+  targets.forEach((f) => {
+    const cur = rowState.get(f.path);
+    if (cur) {
+      cur.selected = false;
+      rowState.set(f.path, cur);
+    }
+  });
+  pruneRowState();
+  applyFiltersAndRender({ skipRemember: true });
+  schedulePersistUi();
   updateEncodeButton();
 });
 

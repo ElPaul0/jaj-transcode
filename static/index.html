@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>jaj-transcode</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>jaj-transcode</h1>
+    <span id="gpu-badge" class="badge">GPU…</span>
+    <span id="ffmpeg-badge" class="badge"></span>
+    <span id="jobs-badge" class="badge">Jobs: 0/2</span>
+    <span id="savings-badge" class="badge" title="Économies après remplacement des originaux">Économisé: —</span>
+  </header>
+
+  <div class="toolbar">
+    <label for="work-dir">Répertoire de travail</label>
+    <input type="text" id="work-dir" value="/data/videos" placeholder="/chemin/vers/vos/videos">
+    <button type="button" id="btn-scan">Analyser</button>
+    <button type="button" id="btn-select-all">Tout sélectionner</button>
+    <button type="button" id="btn-select-none">Aucun</button>
+    <button type="button" id="btn-encode" class="primary" disabled>Encoder la sélection</button>
+    <button type="button" id="btn-stop-all" class="danger hidden">Stop tout</button>
+  </div>
+
+  <main>
+    <p class="meta" id="scan-meta">Choisissez un répertoire et lancez l'analyse.</p>
+    <div class="filter-bar hidden" id="filter-bar">
+      <label>
+        Recherche
+        <input type="search" id="filter-text" placeholder="nom ou chemin…">
+      </label>
+      <label>
+        Extension
+        <select id="filter-ext">
+          <option value="">Toutes</option>
+        </select>
+      </label>
+      <label>
+        Taille min
+        <select id="filter-size-min">
+          <option value="0">—</option>
+          <option value="104857600">100 Mo</option>
+          <option value="524288000">500 Mo</option>
+          <option value="1073741824">1 Go</option>
+          <option value="2147483648">2 Go</option>
+          <option value="5368709120">5 Go</option>
+        </select>
+      </label>
+      <label>
+        Action
+        <select id="filter-action">
+          <option value="">Toutes</option>
+          <option value="encode">À encoder</option>
+          <option value="remux">Remux MP4</option>
+        </select>
+      </label>
+      <label>
+        Trier par
+        <select id="filter-sort">
+          <option value="name">Nom</option>
+          <option value="ext">Extension</option>
+          <option value="size">Taille</option>
+          <option value="mtime">Date</option>
+          <option value="path">Chemin</option>
+          <option value="action">Action</option>
+        </select>
+      </label>
+      <label>
+        Ordre
+        <select id="filter-order">
+          <option value="asc">Croissant</option>
+          <option value="desc">Décroissant</option>
+        </select>
+      </label>
+      <span class="meta" id="filter-meta"></span>
+    </div>
+    <div id="file-list" class="file-list"></div>
+
+    <section id="recap-panel" class="panel hidden">
+      <h2>Jobs (instance partagée)</h2>
+      <p class="meta" id="batch-meta"></p>
+      <table class="recap-table">
+        <thead>
+          <tr>
+            <th>Fichier</th>
+            <th>État / phase</th>
+            <th>Progression</th>
+          </tr>
+        </thead>
+        <tbody id="recap-body"></tbody>
+      </table>
+      <h3 class="log-title">Journal FFmpeg</h3>
+      <pre id="job-log" class="job-log">En attente…</pre>
+      <p class="meta hidden" id="finalize-hint">Uniquement les encodages réussis (état « Enregistré à côté ») — les erreurs ne sont jamais touchées.</p>
+      <p class="finalize-actions hidden" id="finalize-actions">
+        <button type="button" id="btn-delete-original" class="primary">Supprimer les originaux (garder les .mp4)</button>
+        <button type="button" id="btn-cancel-encode" class="danger">Annuler (supprimer les encodages .mp4)</button>
+      </p>
+      <div id="savings-recap" class="savings-recap hidden"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

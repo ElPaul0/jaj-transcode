@@ -1,0 +1,24 @@
+[Unit]
+Description=jaj-transcode — encodage batch FFmpeg NVENC
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/jaj-transcode
+# Paramètres perso : copier .env.example → /etc/jaj-transcode.env
+EnvironmentFile=-/etc/jaj-transcode.env
+EnvironmentFile=-/opt/jaj-transcode/.env
+# Défauts sûrs si aucun fichier d'env n'est présent
+Environment=JAJ_HOST=0.0.0.0
+Environment=JAJ_PORT=8791
+Environment=JAJ_DATA_DIR=/opt/jaj-transcode/data
+Environment=JAJ_FFMPEG=/opt/ffmpeg-btbn/bin/ffmpeg
+Environment=JAJ_FFPROBE=/opt/ffmpeg-btbn/bin/ffprobe
+Environment=JAJ_LD_LIBRARY_PATH=/opt/ffmpeg-btbn/lib
+ExecStart=/opt/jaj-transcode/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8791
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

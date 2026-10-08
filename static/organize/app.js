@@ -6,6 +6,13 @@ const btnDismiss = document.getElementById("btn-dismiss");
 const btnToggleMaybe = document.getElementById("btn-toggle-maybe");
 const scanMeta = document.getElementById("scan-meta");
 const summaryEl = document.getElementById("summary");
+const inboxSection = document.getElementById("inbox-section");
+const inboxList = document.getElementById("inbox-list");
+const inboxPlan = document.getElementById("inbox-plan");
+const btnDepAll = document.getElementById("btn-dep-all");
+const btnDepNone = document.getElementById("btn-dep-none");
+/** Index du dernier dossier cliqué (pour Maj+clic) */
+let lastDepIndex = null;
 const cleanSection = document.getElementById("clean-section");
 const cleanList = document.getElementById("clean-list");
 const maybeSection = document.getElementById("maybe-section");
@@ -24,6 +31,8 @@ let pollTimer = null;
 let lastResult = null;
 /** @type {Map<string, "file"|"folder">} */
 const selectedDeletes = new Map();
+/** Chemins issus du plan « dossiers défavorisés » */
+const folderPlanDeletes = new Set();
 
 function formatSize(bytes) {
   const n = Math.abs(Number(bytes) || 0);
@@ -106,13 +115,66 @@ function setRunning(running) {
 function clearResults() {
   lastResult = null;
   selectedDeletes.clear();
+  folderPlanDeletes.clear();
   summaryEl.classList.add("hidden");
+  inboxSection.classList.add("hidden");
   cleanSection.classList.add("hidden");
   maybeSection.classList.add("hidden");
   maybeBody.classList.add("hidden");
+  inboxList.innerHTML = "";
+  inboxPlan.classList.add("hidden");
+  inboxPlan.textContent = "";
   cleanList.innerHTML = "";
   maybeList.innerHTML = "";
   actionsEl.classList.add("hidden");
+}
+
+function underFolder(path, folder) {
+  if (!path || !folder) return false;
+  const p = String(path).replace(/\\/g, "/");
+  const f = String(folder).replace(/\\/g, "/").replace(/\/+$/, "");
+  return p === f || p.startsWith(f + "/");
+}
+
+function underAny(path, folders) {
+  for (const f of folders) {
+    if (underFolder(path, f)) return true;
+  }
+  return false;
+}
+
+function getDeprioritized() {
+  const set = new Set();
+  inboxList.querySelectorAll("input.dep-cb:checked").forEach((cb) => {
+    if (cb.dataset.path) set.add(cb.dataset.path);
+  });
+  return set;
+}
+
+function lookupDeleteBytes(path, kind) {
+  if (!lastResult) return 0;
+  if (kind === "folder") {
+    for (const g of lastResult.folder_groups || []) {
+      for (const d of g.delete || []) {
+        if (d.path === path) return d.bytes_total || 0;
+      }
+    }
+    return 0;
+  }
+  for (const g of lastResult.inbox_folders || []) {
+    for (const d of g.delete || []) {
+      if (d.path === path) return d.size || 0;
+    }
+  }
+  for (const g of lastResult.file_groups || []) {
+    for (const d of g.delete || []) {
+      if (d.path === path) return d.size || 0;
+    }
+    for (const m of g.members || []) {
+      if (m.path === path) return m.size || 0;
+    }
+  }
+  return 0;
 }
 
 function refreshActionsMeta() {
@@ -124,21 +186,9 @@ function refreshActionsMeta() {
   let nFolders = 0;
   let nFiles = 0;
   selectedDeletes.forEach((kind, path) => {
-    if (kind === "folder") {
-      nFolders += 1;
-      (lastResult.folder_groups || []).forEach((g) => {
-        (g.delete || []).forEach((d) => {
-          if (d.path === path) bytes += d.bytes_total || 0;
-        });
-      });
-    } else {
-      nFiles += 1;
-      (lastResult.file_groups || []).forEach((g) => {
-        (g.delete || []).forEach((d) => {
-          if (d.path === path) bytes += d.size || 0;
-        });
-      });
-    }
+    if (kind === "folder") nFolders += 1;
+    else nFiles += 1;
+    bytes += lookupDeleteBytes(path, kind);
   });
   actionsEl.classList.remove("hidden");
   const bits = [];
@@ -159,6 +209,124 @@ function bindPick(root) {
   });
 }
 
+/** Rebuild file deletes from checked « défavoriser » folders. */
+function applyFolderPrefs() {
+  if (!lastResult) return;
+  const dep = getDeprioritized();
+
+  folderPlanDeletes.forEach((p) => selectedDeletes.delete(p));
+  folderPlanDeletes.clear();
+
+  let planBytes = 0;
+  let planFiles = 0;
+  const folders = lastResult.inbox_folders || [];
+
+  for (const g of folders) {
+    if (!dep.has(g.path)) continue;
+    for (const f of g.delete || []) {
+      const elsePaths = (f.elsewhere || []).map((e) => e.path || e).filter(Boolean);
+      const safeKeep = elsePaths.filter((p) => !underAny(p, dep));
+      if (safeKeep.length > 0) {
+        selectedDeletes.set(f.path, "file");
+        folderPlanDeletes.add(f.path);
+        planBytes += f.size || 0;
+        planFiles += 1;
+        continue;
+      }
+      // Toutes les copies sont dans des dossiers défavorisés : en garder une
+      if (!elsePaths.length) continue;
+      const candidates = [f.path, ...elsePaths];
+      const keep = candidates.slice().sort((a, b) => {
+        const da = underAny(a, dep) ? 1 : 0;
+        const db = underAny(b, dep) ? 1 : 0;
+        if (da !== db) return da - db;
+        return a.length - b.length || a.localeCompare(b);
+      })[0];
+      if (f.path !== keep) {
+        selectedDeletes.set(f.path, "file");
+        folderPlanDeletes.add(f.path);
+        planBytes += f.size || 0;
+        planFiles += 1;
+      }
+    }
+  }
+
+  inboxList.querySelectorAll(".folder-row").forEach((row) => {
+    const cb = row.querySelector("input.dep-cb");
+    row.classList.toggle("is-dep", !!(cb && cb.checked));
+  });
+
+  if (dep.size && planFiles) {
+    inboxPlan.classList.remove("hidden");
+    inboxPlan.innerHTML =
+      `<strong>${dep.size}</strong> dossier(s) défavorisé(s) → ` +
+      `<strong>${planFiles}</strong> fichier(s) à supprimer · ${formatSaved(planBytes)}`;
+  } else if (dep.size) {
+    inboxPlan.classList.remove("hidden");
+    inboxPlan.textContent =
+      "Aucun fichier supprimable : pas de copie sûre hors des dossiers cochés.";
+  } else {
+    inboxPlan.classList.add("hidden");
+    inboxPlan.textContent = "";
+  }
+
+  renderCleanSection();
+  refreshActionsMeta();
+}
+
+function depCheckboxes() {
+  return [...inboxList.querySelectorAll("input.dep-cb")];
+}
+
+function setAllDep(checked) {
+  depCheckboxes().forEach((cb) => {
+    cb.checked = !!checked;
+  });
+  lastDepIndex = null;
+  applyFolderPrefs();
+}
+
+function renderFolderPicker(folders) {
+  inboxList.innerHTML = "";
+  lastDepIndex = null;
+  folders.forEach((g) => {
+    const row = document.createElement("label");
+    row.className = "folder-row" + (g.suggested ? " is-dep" : "");
+    const pct = Math.round((g.ratio || 0) * 100);
+    row.innerHTML = `
+      <input type="checkbox" class="dep-cb" data-path="${escapeHtml(g.path)}"
+        ${g.suggested ? "checked" : ""}>
+      <div>
+        <div class="fname">${escapeHtml(g.name || "Dossier")}
+          ${g.suggested ? '<span class="badge-sug">suggéré</span>' : ""}</div>
+        <div class="fpath">${escapeHtml(g.path)}</div>
+      </div>
+      <div class="stats">
+        <div class="dup">${g.dup_count} déjà ailleurs</div>
+        <div>${g.dup_count}/${g.file_count} · ${pct}%</div>
+      </div>
+      <div class="stats">
+        <div>${formatSaved(g.bytes_reclaimable)}</div>
+        <div style="color:var(--text-dim)">${g.unique_count || 0} unique(s)</div>
+      </div>
+    `;
+    const cb = row.querySelector("input.dep-cb");
+    cb.addEventListener("click", (e) => {
+      const boxes = depCheckboxes();
+      const idx = boxes.indexOf(cb);
+      if (e.shiftKey && lastDepIndex != null && idx >= 0) {
+        const state = cb.checked;
+        const lo = Math.min(lastDepIndex, idx);
+        const hi = Math.max(lastDepIndex, idx);
+        for (let i = lo; i <= hi; i++) boxes[i].checked = state;
+      }
+      if (idx >= 0) lastDepIndex = idx;
+      applyFolderPrefs();
+    });
+    inboxList.appendChild(row);
+  });
+}
+
 function renderFolderCard(g) {
   const keep = g.keep || {};
   const card = document.createElement("div");
@@ -172,17 +340,17 @@ function renderFolderCard(g) {
           <div>
             <div>${d.file_count || 0} media · ${formatSize(d.bytes_total)} · maj ${fmtDate(d.mtime_max)}</div>
             <div class="path">${escapeHtml(d.path)}</div>
-            <label class="pick"><input class="pick-cb" type="checkbox" data-kind="folder" data-path="${escapeHtml(d.path)}" checked> Inclure dans la suppression</label>
+            <label class="pick"><input class="pick-cb" type="checkbox" data-kind="folder" data-path="${escapeHtml(d.path)}" checked> Inclure</label>
           </div>
         </div>`;
     })
     .join("");
   card.innerHTML = `
-    <div class="card-head">📁 <strong>Dossier en double</strong> · ${g.file_count || 0} media · ${formatSize(g.bytes_total)}</div>
+    <div class="card-head">📁 <strong>Dossier cloné à l’identique</strong> · ${g.file_count || 0} media · ${formatSize(g.bytes_total)}</div>
     <div class="lane keep-lane">
       <div class="lane-label">Garder</div>
       <div>
-        <div>maj ${fmtDate(keep.mtime_max)} · ${keep.file_count || 0} media</div>
+        <div>maj ${fmtDate(keep.mtime_max)}</div>
         <div class="path">${escapeHtml(keep.path || "")}</div>
       </div>
     </div>
@@ -205,7 +373,7 @@ function renderFileCard(g) {
           <div>
             <div>${formatSize(d.size)}</div>
             <div class="path">${escapeHtml(d.path)}</div>
-            <label class="pick"><input class="pick-cb" type="checkbox" data-kind="file" data-path="${escapeHtml(d.path)}" checked> Inclure dans la suppression</label>
+            <label class="pick"><input class="pick-cb" type="checkbox" data-kind="file" data-path="${escapeHtml(d.path)}" checked> Inclure</label>
           </div>
         </div>`;
     })
@@ -221,38 +389,103 @@ function renderFileCard(g) {
   return card;
 }
 
-function renderResult(data) {
-  lastResult = data;
-  selectedDeletes.clear();
+function rankMember(m, dep) {
+  const path = m.path || "";
+  const depPen = underAny(path, dep) ? 1 : 0;
+  const staging = m.dir && /à trier|a trier|download|télécharg/i.test(path) ? 1 : 0;
+  return [depPen, staging, path.length, path.toLowerCase()];
+}
 
-  const nFolders = data.folder_group_count || 0;
-  const nFiles = data.file_group_count || 0;
-  const nMaybe = (data.similar_folders || []).length;
-  const reclaim =
-    (data.bytes_reclaimable_folders || 0) + (data.bytes_reclaimable_files || 0);
+function cmpRank(a, b) {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] < b[i]) return -1;
+    if (a[i] > b[i]) return 1;
+  }
+  return 0;
+}
 
-  summaryEl.classList.remove("hidden");
-  summaryEl.innerHTML = `
-    <div class="big"><strong>${data.files_scanned || 0}</strong> media analysés
-      (${data.photos || 0} photos · ${data.videos || 0} vidéos)</div>
-    <div style="margin-top:0.4rem">
-      <strong>${nFolders}</strong> dossier(s) en double ·
-      <strong>${nFiles}</strong> fichier(s) en double ·
-      espace récupérable <strong>${formatSaved(reclaim)}</strong>
-    </div>
-    ${nMaybe ? `<div style="margin-top:0.35rem;color:var(--text-dim)">${nMaybe} cas ambigu(s) listés plus bas (pas de suppression proposée)</div>` : ""}
-  `;
-  scanMeta.textContent = data.work_dir || "";
+function renderCleanSection() {
+  if (!lastResult) return;
+  const dep = getDeprioritized();
+
+  // Retirer les anciennes sélections « clean » (dossiers clonés + fichiers hors plan)
+  const toClear = [];
+  selectedDeletes.forEach((kind, path) => {
+    if (kind === "folder") toClear.push(path);
+    else if (!folderPlanDeletes.has(path)) toClear.push(path);
+  });
+  toClear.forEach((p) => selectedDeletes.delete(p));
 
   cleanList.innerHTML = "";
-  const hasClean = nFolders > 0 || nFiles > 0;
-  if (hasClean) {
+  let nCards = 0;
+
+  (lastResult.folder_groups || []).forEach((g) => {
+    cleanList.appendChild(renderFolderCard(g));
+    nCards += 1;
+  });
+
+  (lastResult.file_groups || []).forEach((g) => {
+    const members = g.members && g.members.length
+      ? g.members.slice()
+      : [g.keep, ...(g.delete || [])].filter(Boolean);
+    if (members.length < 2) return;
+
+    // Si une copie est déjà planifiée via dossiers défavorisés, ne pas re-proposer ici
+    if (members.some((m) => folderPlanDeletes.has(m.path))) return;
+
+    const ordered = members.slice().sort((a, b) => cmpRank(rankMember(a, dep), rankMember(b, dep)));
+    const keep = ordered[0];
+    const toDelete = ordered.slice(1).filter((m) => !folderPlanDeletes.has(m.path));
+    if (!toDelete.length) return;
+
+    const card = renderFileCard({
+      ...g,
+      keep,
+      delete: toDelete,
+      count: members.length,
+    });
+    cleanList.appendChild(card);
+    nCards += 1;
+  });
+
+  if (nCards) {
     cleanSection.classList.remove("hidden");
-    (data.folder_groups || []).forEach((g) => cleanList.appendChild(renderFolderCard(g)));
-    (data.file_groups || []).forEach((g) => cleanList.appendChild(renderFileCard(g)));
     bindPick(cleanList);
   } else {
     cleanSection.classList.add("hidden");
+  }
+}
+
+function renderResult(data) {
+  lastResult = data;
+  selectedDeletes.clear();
+  folderPlanDeletes.clear();
+
+  const folders = data.inbox_folders || [];
+  const nInbox = folders.length;
+  const nFolders = data.folder_group_count || 0;
+  const nFiles = data.file_group_count || 0;
+  const nMaybe = (data.similar_folders || []).length;
+  const suggested = folders.filter((g) => g.suggested).length;
+
+  summaryEl.classList.remove("hidden");
+  summaryEl.innerHTML = `
+    <div class="big"><strong>${data.files_scanned || 0}</strong> media
+      (${data.photos || 0} photos · ${data.videos || 0} vidéos)</div>
+    <div style="margin-top:0.4rem">
+      <strong>${nInbox}</strong> dossier(s) avec doublons
+      (${suggested} suggéré(s)) ·
+      <strong>${nFolders}</strong> dossier(s) clonés ·
+      <strong>${nFiles}</strong> groupe(s) fichiers
+    </div>
+  `;
+  scanMeta.textContent = data.work_dir || "";
+
+  if (nInbox) {
+    inboxSection.classList.remove("hidden");
+    renderFolderPicker(folders);
+  } else {
+    inboxSection.classList.add("hidden");
   }
 
   maybeList.innerHTML = "";
@@ -275,7 +508,7 @@ function renderResult(data) {
     maybeSection.classList.add("hidden");
   }
 
-  refreshActionsMeta();
+  applyFolderPrefs();
 }
 
 async function pollStatus() {
@@ -296,6 +529,7 @@ async function pollStatus() {
     if (st.state === "done" && st.result) {
       const r = st.result;
       if (
+        !(r.inbox_folder_count > 0) &&
         !(r.file_group_count > 0) &&
         !(r.folder_group_count > 0) &&
         !(r.similar_folders || []).length
@@ -306,17 +540,18 @@ async function pollStatus() {
         renderResult(r);
       }
     } else if (st.state === "error") {
-      alert(`Organize: ${st.error || st.message}`);
+      clearResults();
+      scanMeta.textContent = st.error || "Erreur";
     } else if (st.state === "cancelled") {
       scanMeta.textContent = "Analyse annulée.";
     }
   } catch (e) {
+    setRunning(false);
     if (pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;
     }
-    setRunning(false);
-    alert(`Status: ${e.message}`);
+    setLog(null, `Erreur: ${e.message}`);
   }
 }
 
@@ -350,11 +585,18 @@ btnStop.addEventListener("click", async () => {
   }
 });
 
+if (btnDepAll) btnDepAll.addEventListener("click", () => setAllDep(true));
+if (btnDepNone) btnDepNone.addEventListener("click", () => setAllDep(false));
+
 btnDismiss.addEventListener("click", () => {
+  setAllDep(false);
   selectedDeletes.clear();
-  cleanList.querySelectorAll("input.pick-cb").forEach((cb) => {
+  folderPlanDeletes.clear();
+  document.querySelectorAll("input.pick-cb").forEach((cb) => {
     cb.checked = false;
   });
+  inboxPlan.classList.add("hidden");
+  inboxPlan.textContent = "";
   refreshActionsMeta();
 });
 
@@ -409,17 +651,10 @@ btnApply.addEventListener("click", async () => {
 });
 
 initTheme();
-api("/api/config")
-  .then((cfg) => {
-    if (cfg.work_dir) workDirEl.value = cfg.work_dir;
-  })
-  .catch(() => {});
-api("/api/session")
-  .then((s) => {
-    if (s.savings && s.savings.bytes_saved) {
-      savingsBadge.textContent = `Économisé: ${formatSaved(s.savings.bytes_saved)} · ${s.savings.files_replaced || 0}`;
-      savingsBadge.classList.add("ok");
-    }
-    if (s.work_dir && !workDirEl.value) workDirEl.value = s.work_dir;
-  })
-  .catch(() => {});
+
+(async () => {
+  try {
+    const cfg = await api("/api/config");
+    if (cfg.work_dir && !workDirEl.value) workDirEl.value = cfg.work_dir;
+  } catch (_) {}
+})();

@@ -98,6 +98,39 @@ button.linkish {
 }
 .list { margin-top: 0.65rem; max-height: 55vh; overflow: auto; }
 
+.sel-bar {
+  display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.55rem;
+}
+.sel-bar button { font-size: 0.8rem; padding: 0.3rem 0.65rem; }
+.hint-extra { display: inline-block; margin-left: 0.25rem; opacity: 0.85; }
+.plan-bar {
+  margin-top: 0.65rem; padding: 0.65rem 0.85rem;
+  background: var(--err-bg); border: 1px solid var(--err); border-radius: var(--radius);
+  font-size: 0.86rem;
+}
+.folder-table {
+  margin-top: 0.65rem; max-height: 48vh; overflow: auto;
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.folder-row {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr auto auto;
+  gap: 0.65rem; align-items: start;
+  padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--border);
+  font-size: 0.84rem; cursor: pointer;
+}
+.folder-row:last-child { border-bottom: none; }
+.folder-row:hover { background: var(--bg-row); }
+.folder-row.is-dep { background: var(--err-bg); }
+.folder-row .fname { font-weight: 600; }
+.folder-row .fpath { color: var(--text-dim); font-size: 0.74rem; word-break: break-all; margin-top: 0.15rem; }
+.folder-row .stats { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.folder-row .stats .dup { color: var(--err); font-weight: 600; }
+.folder-row .badge-sug {
+  font-size: 0.68rem; padding: 0.1rem 0.35rem; border-radius: 3px;
+  border: 1px solid var(--accent); color: var(--accent); white-space: nowrap;
+}
+
 .card {
   padding: 0; margin-bottom: 0.75rem; background: var(--bg-row);
   border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.86rem;

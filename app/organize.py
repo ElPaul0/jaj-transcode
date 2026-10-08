@@ -111,17 +111,68 @@ def _iter_media(
     return out
 
 
+# Dossiers « bac à trier » : on préfère garder la copie rangée ailleurs
+STAGING_TOKENS = (
+    "à trier",
+    "a trier",
+    "trier",
+    "à classer",
+    "a classer",
+    "classer",
+    "à ranger",
+    "a ranger",
+    "inbox",
+    "incoming",
+    "unsorted",
+    "dump",
+    "temp",
+    "tmp",
+    "brouillon",
+    "imports",
+    "a importer",
+    "à importer",
+    "new folder",
+    "nouveau dossier",
+    "download",
+    "downloads",
+    "téléchargement",
+    "telechargement",
+    "téléchargements",
+    "telechargements",
+)
+
+
+def _staging_penalty(path: str) -> int:
+    """Plus élevé = dossier type inbox / à trier (moins prioritaire à garder)."""
+    p = path.lower().replace("\\", "/")
+    score = 0
+    for tok in STAGING_TOKENS:
+        if tok in p:
+            score += 3
+    return score
+
+
+def _is_under(path: str, folder: str) -> bool:
+    try:
+        Path(path).resolve().relative_to(Path(folder).resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
 def _keep_file_rank(item: dict[str, Any]) -> tuple:
     path = Path(item["path"])
     name = path.name.lower()
     ext = path.suffix.lower()
-    # Préférer conteneurs « finaux » et chemins plus courts / plus récents
     prefer_ext = 0 if ext in {".mp4", ".jpg", ".jpeg", ".png"} else 1
     copyish = 1 if any(
         tok in name
         for tok in ("copy", "copie", " duplicate", "(1)", "(2)", "(3)", " - copy", "_copy")
     ) else 0
+    # Pénaliser les chemins « à trier » pour garder la copie déjà rangée
+    staging = _staging_penalty(str(path))
     return (
+        staging,
         prefer_ext,
         copyish,
         -float(item.get("mtime") or 0),
@@ -131,18 +182,119 @@ def _keep_file_rank(item: dict[str, Any]) -> tuple:
 
 
 def _keep_folder_rank(folder: dict[str, Any]) -> tuple:
-    name = Path(folder["path"]).name.lower()
+    path = folder["path"]
+    name = Path(path).name.lower()
     copyish = 1 if any(
         tok in name
         for tok in ("copy", "copie", " duplicate", "(1)", "(2)", " - copy", "_copy", "backup")
     ) else 0
+    staging = _staging_penalty(path)
     return (
+        staging,
         copyish,
         -float(folder.get("mtime_max") or 0),
         -int(folder.get("file_count") or 0),
-        len(folder["path"]),
-        folder["path"].lower(),
+        len(path),
+        path.lower(),
     )
+
+
+def _find_inbox_folders(
+    files: list[dict[str, Any]],
+    by_file: dict[tuple[str, int], list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """
+    Tous les dossiers concernés par des doublons inter-dossiers.
+    L'UI laisse cocher ceux à défavoriser (ex. « à trier », Downloads).
+    Tri : nombre de fichiers déjà présents ailleurs, décroissant.
+    """
+    by_dir: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for f in files:
+        by_dir[f["dir"]].append(f)
+
+    groups: list[dict[str, Any]] = []
+    for dpath, dir_files in by_dir.items():
+        if len(dir_files) < 2:
+            continue
+
+        to_delete: list[dict[str, Any]] = []
+        elsewhere_best: list[dict[str, Any]] = []
+        for f in dir_files:
+            key = (f["name"].lower(), int(f["size"]))
+            members = by_file.get(key) or []
+            outsiders = [m for m in members if not _is_under(m["path"], dpath)]
+            if not outsiders:
+                continue
+            best = sorted(outsiders, key=_keep_file_rank)[0]
+            elsewhere_best.append(best)
+            to_delete.append(
+                {
+                    "path": f["path"],
+                    "name": f["name"],
+                    "size": int(f["size"]),
+                    "mtime": f.get("mtime"),
+                    "kind": f.get("kind"),
+                    "dir": f["dir"],
+                    "elsewhere": [
+                        {
+                            "path": m["path"],
+                            "name": m["name"],
+                            "dir": m["dir"],
+                            "size": int(m["size"]),
+                        }
+                        for m in sorted(outsiders, key=_keep_file_rank)[:12]
+                    ],
+                }
+            )
+
+        n = len(dir_files)
+        n_dup = len(to_delete)
+        if n_dup < 2:
+            continue
+
+        ratio = n_dup / n
+        reclaim = sum(int(f["size"]) for f in to_delete)
+        is_staging = _staging_penalty(dpath) > 0
+
+        seen_ex: set[str] = set()
+        examples: list[dict[str, Any]] = []
+        for ex in elsewhere_best:
+            if ex["path"] in seen_ex:
+                continue
+            seen_ex.add(ex["path"])
+            examples.append({"path": ex["path"], "name": ex["name"], "dir": ex["dir"]})
+            if len(examples) >= 5:
+                break
+
+        groups.append(
+            {
+                "type": "inbox",
+                "path": dpath,
+                "name": Path(dpath).name,
+                "file_count": n,
+                "dup_count": n_dup,
+                "unique_count": n - n_dup,
+                "ratio": round(ratio, 3),
+                "bytes_reclaimable": reclaim,
+                "bytes_total": sum(int(f["size"]) for f in dir_files),
+                "delete": to_delete,
+                "elsewhere_examples": examples,
+                "staging": is_staging,
+                "suggested": is_staging,
+                "reason": (
+                    f"{n_dup}/{n} fichiers ({ratio:.0%}) existent déjà dans un autre dossier"
+                ),
+            }
+        )
+
+    groups.sort(
+        key=lambda g: (
+            -int(g["dup_count"]),
+            -int(g["bytes_reclaimable"]),
+            -float(g["ratio"]),
+        )
+    )
+    return groups
 
 
 def _folder_stats(files: list[dict[str, Any]], root: Path) -> dict[str, dict[str, Any]]:
@@ -238,13 +390,24 @@ def analyze_tree(
     for f in files:
         by_file[(f["name"].lower(), int(f["size"]))].append(f)
 
+    # --- Dossiers « bac » : contenu déjà présent ailleurs ---
+    _prog(phase="inbox", pct=55, message="Dossiers redondants…")
+    inbox_folders = _find_inbox_folders(files, by_file)
+    # Estimation si on défavorise les dossiers « suggérés » (à trier, downloads…)
+    suggested = [g for g in inbox_folders if g.get("suggested")]
+    inbox_bytes = sum(int(g["bytes_reclaimable"]) for g in suggested)
+    _log(
+        f"Dossiers concernés par des doublons: {len(inbox_folders)} "
+        f"(dont {len(suggested)} suggérés à défavoriser, "
+        f"~{inbox_bytes / (1024**3):.2f} Go)"
+    )
+
     file_groups: list[dict[str, Any]] = []
     file_delete_count = 0
     file_bytes = 0
     for (_name, size), members in by_file.items():
         if len(members) < 2:
             continue
-        # Ignorer si tous dans le même dossier (souvent pas « copie ») — non, copies côte à côte existent
         ordered = sorted(members, key=_keep_file_rank)
         keep = ordered[0]
         to_delete = ordered[1:]
@@ -260,17 +423,18 @@ def analyze_tree(
                 "count": len(members),
                 "keep": keep,
                 "delete": to_delete,
+                "members": ordered,
                 "bytes_reclaimable": reclaim,
             }
         )
     file_groups.sort(key=lambda g: (-int(g["bytes_reclaimable"]), -int(g["count"])))
-    _log(f"Fichiers: {len(file_groups)} groupe(s), {file_delete_count} à supprimer")
+    _log(f"Fichiers (hors dossiers redondants): {len(file_groups)} groupe(s)")
 
     if cancel_check and cancel_check():
         raise RuntimeError("Annulé")
 
     # --- Doublons dossiers (même arborescence relative + tailles) ---
-    _prog(phase="folders", pct=70, message="Doublons dossiers…")
+    _prog(phase="folders", pct=75, message="Doublons dossiers…")
     folders = _folder_stats(files, root)
     by_sig: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for fr in folders.values():
@@ -384,15 +548,22 @@ def analyze_tree(
         _log(f"Dossiers similaires (à vérifier): {len(similar_folders)}")
 
     _prog(phase="done", pct=100, message="Analyse terminée")
+    total_reclaim = file_bytes + folder_bytes + inbox_bytes
     _log(
         f"Terminé en {time.time() - t0:.1f}s — "
-        f"fichiers {file_bytes / (1024**3):.2f} Go + dossiers {folder_bytes / (1024**3):.2f} Go récupérables"
+        f"{total_reclaim / (1024**3):.2f} Go récupérables "
+        f"(bac {inbox_bytes / (1024**3):.2f} + dossiers {folder_bytes / (1024**3):.2f} "
+        f"+ fichiers {file_bytes / (1024**3):.2f})"
     )
     return {
         "work_dir": str(root),
         "files_scanned": len(files),
         "photos": photos,
         "videos": videos,
+        "inbox_folders": inbox_folders,
+        "inbox_folder_count": len(inbox_folders),
+        "inbox_delete_count": sum(int(g["dup_count"]) for g in inbox_folders),
+        "bytes_reclaimable_inbox": inbox_bytes,
         "file_groups": file_groups,
         "folder_groups": folder_groups,
         "similar_folders": similar_folders[:50],
@@ -402,8 +573,8 @@ def analyze_tree(
         "folder_delete_count": folder_delete_count,
         "bytes_reclaimable_files": file_bytes,
         "bytes_reclaimable_folders": folder_bytes,
-        "bytes_reclaimable": file_bytes + folder_bytes,
-        "method": "name+size + folder signature",
+        "bytes_reclaimable": total_reclaim,
+        "method": "name+size + inbox folders + folder signature",
     }
 
 

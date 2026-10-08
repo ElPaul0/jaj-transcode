@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>jaj-organize</title>
-  <link rel="stylesheet" href="/static/organize/style.css?v=2">
+  <link rel="stylesheet" href="/static/organize/style.css?v=6">
 </head>
 <body>
   <header>
@@ -29,15 +29,31 @@
 
   <main class="layout">
     <section class="col">
-      <p class="meta" id="scan-meta">Analyse photos + vidéos. On propose de supprimer uniquement les copies sûres.</p>
+      <p class="meta" id="scan-meta">Coche les dossiers à défavoriser : on supprime leurs copies quand le fichier existe déjà ailleurs.</p>
       <div id="summary" class="summary hidden"></div>
 
-      <div id="clean-section" class="block hidden">
-        <h2>Copies sûres — à supprimer</h2>
+      <div id="inbox-section" class="block hidden">
+        <h2>Dossiers concernés par des doublons</h2>
         <p class="hint">
-          Même contenu détecté (mêmes noms + tailles).
-          <strong class="tag-keep">Vert = on garde</strong> ·
-          <strong class="tag-del">Rouge = copie à supprimer</strong> (coché par défaut).
+          Triés par nombre de fichiers déjà présents ailleurs.
+          Coche ceux à <strong class="tag-del">défavoriser</strong>
+          (ex. Photos à trier, Downloads) — on garde les copies dans les dossiers non cochés.
+          <span class="hint-extra">Maj+clic pour une plage.</span>
+        </p>
+        <div class="sel-bar">
+          <button type="button" id="btn-dep-all">Tout sélectionner</button>
+          <button type="button" id="btn-dep-none">Aucun</button>
+        </div>
+        <div id="inbox-plan" class="plan-bar hidden"></div>
+        <div id="inbox-list" class="folder-table"></div>
+      </div>
+
+      <div id="clean-section" class="block hidden">
+        <h2>Autres copies sûres</h2>
+        <p class="hint">
+          Dossiers clonés à l’identique, ou fichiers en double non couverts ci-dessus.
+          <strong class="tag-keep">Vert = garder</strong> ·
+          <strong class="tag-del">Rouge = supprimer</strong>.
         </p>
         <div id="clean-list" class="list"></div>
       </div>
@@ -46,8 +62,7 @@
         <button type="button" id="btn-toggle-maybe" class="linkish"></button>
         <div id="maybe-body" class="hidden">
           <p class="hint">
-            Même fichiers (noms + tailles) mais organisation différente.
-            <strong>Aucune suppression automatique</strong> — à ouvrir à la main si besoin.
+            Même fichiers mais organisation différente — <strong>aucune suppression proposée</strong>.
           </p>
           <div id="maybe-list" class="list"></div>
         </div>
@@ -60,12 +75,12 @@
       <div id="actions" class="actions hidden">
         <p class="meta" id="actions-meta"></p>
         <button type="button" id="btn-apply" class="primary">Supprimer les copies cochées</button>
-        <button type="button" id="btn-dismiss">Tout décocher / ignorer</button>
+        <button type="button" id="btn-dismiss">Tout décocher</button>
       </div>
       <div id="run-recap" class="recap hidden"></div>
     </aside>
   </main>
 
-  <script src="/static/organize/app.js?v=2"></script>
+  <script src="/static/organize/app.js?v=6"></script>
 </body>
 </html>

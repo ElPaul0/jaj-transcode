@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>jaj-transcode</title>
-  <link rel="stylesheet" href="/static/style.css?v=dedup3">
+  <link rel="stylesheet" href="/static/style.css?v=dedup4">
 </head>
 <body>
   <header>
@@ -135,6 +135,15 @@
         <pre id="job-log" class="job-log">En attente…</pre>
         <h3 class="log-title hidden" id="dedup-log-title">Journal doublons</h3>
         <pre id="dedup-log" class="job-log hidden">—</pre>
+        <div id="dedup-recap" class="dedup-recap hidden">
+          <h3 class="log-title">Récap doublons</h3>
+          <p class="meta" id="dedup-recap-meta"></p>
+          <div id="dedup-recap-list" class="dedup-recap-list"></div>
+          <p class="finalize-actions" id="dedup-actions">
+            <button type="button" id="btn-dedup-apply" class="primary">Dédoublonner</button>
+            <button type="button" id="btn-dedup-dismiss" class="danger">Annuler</button>
+          </p>
+        </div>
         <p class="meta hidden" id="finalize-hint">Uniquement les encodages réussis (état « Enregistré à côté ») — les erreurs ne sont jamais touchées.</p>
         <div id="pending-savings" class="savings-recap pending-savings hidden"></div>
         <p class="finalize-actions hidden" id="finalize-actions">
@@ -146,6 +155,6 @@
     </div>
   </main>
 
-  <script src="/static/app.js?v=dedup3"></script>
+  <script src="/static/app.js?v=dedup4"></script>
 </body>
 </html>

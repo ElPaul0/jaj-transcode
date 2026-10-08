@@ -67,6 +67,12 @@ header h1 {
   border-radius: var(--radius);
   background: var(--bg-row);
   border: 1px solid var(--border);
+  text-decoration: none;
+  color: inherit;
+}
+a.badge:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .badge.ok {

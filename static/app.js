@@ -684,7 +684,7 @@ function updateJobsBadge(status) {
 }
 
 function refreshStopButton() {
-  if (btnStopAll) btnStopAll.classList.toggle("hidden", !(encodeBusy || dedupBusy));
+  if (btnStopAll) btnStopAll.classList.toggle("hidden", !encodeBusy);
 }
 
 function fillConcurrencySelect(selectEl, selected, cap) {
@@ -1369,30 +1369,15 @@ btnDeleteOriginal.addEventListener("click", () => finalizeBatch("delete_original
 btnCancelEncode.addEventListener("click", () => finalizeBatch("cancel"));
 
 btnStopAll.addEventListener("click", async () => {
-  if (!confirm("Stopper encode/remux et l'analyse doublons en cours ?")) return;
-  const parts = [];
+  if (!confirm("Stopper tous les jobs encode/remux en cours et en file ?")) return;
   try {
-    if (dedupBusy) {
-      await cancelDedupAnalysis();
-      parts.push("doublons: annulation demandée");
-    }
-    if (encodeBusy) {
-      const res = await api("/api/jobs/stop-all", { method: "POST", body: "{}" });
-      updateJobsBadge(res.jobs_status);
-      lastJobsSig = "";
-      await pollSession();
-      parts.push(
-        `jobs: ${res.cancel_running || 0} en cours, ${res.cancelled_queued || 0} en file`
-      );
-    }
-    if (!parts.length) {
-      // Au cas où l'UI n'a pas encore le flag
-      await cancelDedupAnalysis();
-      const res = await api("/api/jobs/stop-all", { method: "POST", body: "{}" });
-      updateJobsBadge(res.jobs_status);
-      parts.push("stop envoyé");
-    }
-    alert(`Stop: ${parts.join(" · ")}`);
+    const res = await api("/api/jobs/stop-all", { method: "POST", body: "{}" });
+    updateJobsBadge(res.jobs_status);
+    lastJobsSig = "";
+    await pollSession();
+    alert(
+      `Stop: ${res.cancel_running || 0} en cours, ${res.cancelled_queued || 0} en file annulé(s).`
+    );
   } catch (e) {
     alert(`Stop: ${e.message}`);
   }

@@ -31,7 +31,18 @@ from app.encoder import (
     start_batch,
     stop_all_jobs,
 )
-from app.dedup import delete_duplicates, find_duplicate_groups
+from app.dedup import (
+    cancel_dedup_job,
+    delete_duplicates,
+    get_dedup_job,
+    start_dedup_scan,
+)
+from app.organize import (
+    cancel_organize_job,
+    delete_paths as organize_delete_paths,
+    get_organize_job,
+    start_organize_scan,
+)
 from app.scanner import entry_to_dict, scan_videos
 from app import session as app_session
 
@@ -93,6 +104,16 @@ class DedupScanRequest(BaseModel):
 class DedupDeleteRequest(BaseModel):
     paths: list[str] = Field(default_factory=list)
     work_dir: str | None = None
+
+
+class OrganizeScanRequest(BaseModel):
+    work_dir: str | None = None
+
+
+class OrganizeDeleteRequest(BaseModel):
+    work_dir: str | None = None
+    files: list[str] = Field(default_factory=list)
+    folders: list[str] = Field(default_factory=list)
 
 
 def _resolve_allowed(path_str: str, work_dir: str | None = None) -> Path:
@@ -301,15 +322,31 @@ def _resolve_under_work(path_str: str, work_dir: str) -> Path:
 
 @app.post("/api/dedup/scan")
 def dedup_scan(body: DedupScanRequest):
-    """Détecte les doublons exacts (même taille + même hash) sous work_dir."""
+    """Lance l'analyse doublons en arrière-plan (poll GET /api/dedup/status)."""
     settings = get_settings()
     root = body.work_dir or settings.work_dir
     if body.work_dir:
         set_work_dir(body.work_dir)
-    try:
-        return find_duplicate_groups(root)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not Path(root).is_dir():
+        raise HTTPException(status_code=400, detail=f"Répertoire introuvable: {root}")
+    return start_dedup_scan(root)
+
+
+@app.get("/api/dedup/status")
+def dedup_status(job_id: str | None = None):
+    """État + journal du job dédup en cours ou terminé."""
+    job = get_dedup_job(job_id)
+    if not job:
+        return {"state": "idle", "log": [], "message": "Aucun job"}
+    return job
+
+
+@app.post("/api/dedup/cancel")
+def dedup_cancel(job_id: str | None = None):
+    job = cancel_dedup_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Aucun job à annuler")
+    return job
 
 
 @app.post("/api/dedup/delete")
@@ -331,6 +368,69 @@ def dedup_delete(body: DedupDeleteRequest):
         "run_savings": savings_update.get("run"),
         "savings": savings_update.get("total") or app_session.get_savings(),
     }
+
+
+@app.post("/api/organize/scan")
+def organize_scan(body: OrganizeScanRequest):
+    """Lance jaj-organize (photos+vidéos, doublons fichiers/dossiers)."""
+    settings = get_settings()
+    root = body.work_dir or settings.work_dir
+    if body.work_dir:
+        set_work_dir(body.work_dir)
+    if not Path(root).is_dir():
+        raise HTTPException(status_code=400, detail=f"Répertoire introuvable: {root}")
+    return start_organize_scan(root)
+
+
+@app.get("/api/organize/status")
+def organize_status(job_id: str | None = None):
+    job = get_organize_job(job_id)
+    if not job:
+        return {"state": "idle", "log": [], "message": "Aucun job"}
+    return job
+
+
+@app.post("/api/organize/cancel")
+def organize_cancel(job_id: str | None = None):
+    job = cancel_organize_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Aucun job à annuler")
+    return job
+
+
+@app.post("/api/organize/delete")
+def organize_delete(body: OrganizeDeleteRequest):
+    """Supprime fichiers et/ou dossiers sélectionnés ; met à jour les économies."""
+    settings = get_settings()
+    root = body.work_dir or settings.work_dir
+    files = list(body.files or [])
+    folders = list(body.folders or [])
+    if not files and not folders:
+        raise HTTPException(status_code=400, detail="Rien à supprimer")
+    for p in files + folders:
+        _resolve_allowed(p, root)
+    results: list[dict] = []
+    if folders:
+        results.extend(organize_delete_paths(folders, root, recursive_dirs=True))
+    if files:
+        results.extend(organize_delete_paths(files, root, recursive_dirs=False))
+    savings_update = app_session.record_dedup(results)
+    return {
+        "results": results,
+        "deleted": sum(1 for r in results if r.get("deleted")),
+        "bytes_freed": sum(int(r.get("bytes") or 0) for r in results if r.get("deleted")),
+        "run_savings": savings_update.get("run"),
+        "savings": savings_update.get("total") or app_session.get_savings(),
+    }
+
+
+@app.get("/organize")
+@app.get("/organize/")
+def organize_index():
+    index_path = STATIC_DIR / "organize" / "index.html"
+    if not index_path.is_file():
+        raise HTTPException(status_code=500, detail="jaj-organize UI manquante")
+    return FileResponse(index_path)
 
 
 @app.get("/api/replace/preview")

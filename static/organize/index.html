@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>jaj-organize</title>
+  <link rel="stylesheet" href="/static/organize/style.css?v=1">
+</head>
+<body>
+  <header>
+    <h1>jaj-organize</h1>
+    <span class="badge" id="status-badge">Prêt</span>
+    <span class="badge" id="savings-badge" title="Espace libéré (session)">Économisé: —</span>
+    <label class="theme-toggle" title="Thème">
+      <span>Thème</span>
+      <select id="theme-select">
+        <option value="dark">Sombre</option>
+        <option value="light">Clair</option>
+      </select>
+    </label>
+  </header>
+
+  <div class="toolbar">
+    <label for="work-dir">Répertoire</label>
+    <input type="text" id="work-dir" placeholder="/chemin/photos-ou-videos">
+    <button type="button" id="btn-scan" class="primary">Analyser</button>
+    <button type="button" id="btn-stop" class="danger hidden">Stop</button>
+  </div>
+
+  <main class="layout">
+    <section class="col">
+      <p class="meta" id="scan-meta">Choisissez un répertoire contenant photos et/ou vidéos.</p>
+      <div id="summary" class="summary hidden"></div>
+
+      <div id="folder-section" class="block hidden">
+        <h2>Dossiers en double</h2>
+        <p class="meta">Même arborescence relative + tailles. Le plus récent / nom « propre » est conservé.</p>
+        <div id="folder-list" class="list"></div>
+      </div>
+
+      <div id="similar-section" class="block hidden">
+        <h2>Dossiers similaires</h2>
+        <p class="meta">Même ensemble nom+taille mais chemins différents — à vérifier avant toute suppression.</p>
+        <div id="similar-list" class="list"></div>
+      </div>
+
+      <div id="file-section" class="block hidden">
+        <h2>Fichiers en double</h2>
+        <p class="meta">Même nom + même taille (photos et vidéos).</p>
+        <div id="file-list" class="list"></div>
+      </div>
+    </section>
+
+    <aside class="col side">
+      <h2>Journal</h2>
+      <pre id="log" class="log">En attente…</pre>
+      <div id="actions" class="actions hidden">
+        <p class="meta" id="actions-meta"></p>
+        <button type="button" id="btn-apply" class="primary">Dédoublonner la sélection</button>
+        <button type="button" id="btn-dismiss" class="danger">Tout ignorer</button>
+      </div>
+      <div id="run-recap" class="recap hidden"></div>
+    </aside>
+  </main>
+
+  <script src="/static/organize/app.js?v=1"></script>
+</body>
+</html>

@@ -139,51 +139,6 @@ a.badge:hover {
   color: var(--ok);
 }
 
-.dedup-recap {
-  margin-top: 1rem;
-  padding: 0.85rem 1rem;
-  background: var(--bg-row);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.dedup-recap .log-title {
-  margin-top: 0;
-}
-
-.dedup-recap-list {
-  max-height: 280px;
-  overflow: auto;
-  margin: 0.6rem 0 0.75rem;
-  font-size: 0.82rem;
-  line-height: 1.4;
-}
-
-.dedup-group {
-  padding: 0.55rem 0;
-  border-top: 1px solid var(--border);
-}
-
-.dedup-group:first-child {
-  border-top: none;
-  padding-top: 0;
-}
-
-.dedup-keep {
-  color: var(--ok);
-}
-
-.dedup-del {
-  color: var(--err);
-  margin-top: 0.2rem;
-}
-
-.dedup-path {
-  color: var(--text-dim);
-  word-break: break-all;
-  font-size: 0.78rem;
-}
-
 .toolbar {
   display: flex;
   flex-wrap: wrap;

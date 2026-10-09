@@ -31,12 +31,6 @@ from app.encoder import (
     start_batch,
     stop_all_jobs,
 )
-from app.dedup import (
-    cancel_dedup_job,
-    delete_duplicates,
-    get_dedup_job,
-    start_dedup_scan,
-)
 from app.organize import (
     cancel_organize_job,
     delete_paths as organize_delete_paths,
@@ -95,15 +89,6 @@ class RowStateRequest(BaseModel):
 class ConcurrencyRequest(BaseModel):
     max_nvenc: int | None = Field(default=None, ge=1, le=64)
     max_remux: int | None = Field(default=None, ge=1, le=64)
-
-
-class DedupScanRequest(BaseModel):
-    work_dir: str | None = None
-
-
-class DedupDeleteRequest(BaseModel):
-    paths: list[str] = Field(default_factory=list)
-    work_dir: str | None = None
 
 
 class OrganizeScanRequest(BaseModel):
@@ -320,56 +305,6 @@ def _resolve_under_work(path_str: str, work_dir: str) -> Path:
     return target
 
 
-@app.post("/api/dedup/scan")
-def dedup_scan(body: DedupScanRequest):
-    """Lance l'analyse doublons en arrière-plan (poll GET /api/dedup/status)."""
-    settings = get_settings()
-    root = body.work_dir or settings.work_dir
-    if body.work_dir:
-        set_work_dir(body.work_dir)
-    if not Path(root).is_dir():
-        raise HTTPException(status_code=400, detail=f"Répertoire introuvable: {root}")
-    return start_dedup_scan(root)
-
-
-@app.get("/api/dedup/status")
-def dedup_status(job_id: str | None = None):
-    """État + journal du job dédup en cours ou terminé."""
-    job = get_dedup_job(job_id)
-    if not job:
-        return {"state": "idle", "log": [], "message": "Aucun job"}
-    return job
-
-
-@app.post("/api/dedup/cancel")
-def dedup_cancel(job_id: str | None = None):
-    job = cancel_dedup_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Aucun job à annuler")
-    return job
-
-
-@app.post("/api/dedup/delete")
-def dedup_delete(body: DedupDeleteRequest):
-    """Supprime les doublons choisis et ajoute l'espace au compteur d'économies."""
-    if not body.paths:
-        raise HTTPException(status_code=400, detail="Aucun chemin à supprimer")
-    settings = get_settings()
-    root = body.work_dir or settings.work_dir
-    # Sécurité : chaque chemin doit être sous work_dir
-    for p in body.paths:
-        _resolve_allowed(p, root)
-    results = delete_duplicates(body.paths, root)
-    savings_update = app_session.record_dedup(results)
-    return {
-        "results": results,
-        "deleted": sum(1 for r in results if r.get("deleted")),
-        "bytes_freed": sum(int(r.get("bytes") or 0) for r in results if r.get("deleted")),
-        "run_savings": savings_update.get("run"),
-        "savings": savings_update.get("total") or app_session.get_savings(),
-    }
-
-
 @app.post("/api/organize/scan")
 def organize_scan(body: OrganizeScanRequest):
     """Lance jaj-organize (photos+vidéos, doublons fichiers/dossiers)."""
@@ -407,8 +342,12 @@ def organize_delete(body: OrganizeDeleteRequest):
     folders = list(body.folders or [])
     if not files and not folders:
         raise HTTPException(status_code=400, detail="Rien à supprimer")
-    for p in files + folders:
+    for p in files:
         _resolve_allowed(p, root)
+    for p in folders:
+        path = _resolve_under_work(p, root)
+        if not path.is_dir():
+            raise HTTPException(status_code=400, detail=f"Dossier introuvable: {p}")
     results: list[dict] = []
     if folders:
         results.extend(organize_delete_paths(folders, root, recursive_dirs=True))

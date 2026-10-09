@@ -42,7 +42,9 @@ header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
 .badge {
   font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: var(--radius);
   background: var(--bg-row); border: 1px solid var(--border);
+  text-decoration: none; color: inherit;
 }
+a.badge:hover { border-color: var(--accent); color: var(--accent); }
 .badge.ok { border-color: var(--ok); color: var(--ok); }
 .theme-toggle { margin-left: auto; display: flex; align-items: center; gap: 0.4rem; color: var(--text-dim); font-size: 0.8rem; }
 .theme-toggle select {

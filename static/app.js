@@ -1,21 +1,9 @@
 const workDirEl = document.getElementById("work-dir");
 const btnScan = document.getElementById("btn-scan");
-const btnDedup = document.getElementById("btn-dedup");
-const dedupLogEl = document.getElementById("dedup-log");
-const dedupLogTitle = document.getElementById("dedup-log-title");
-const dedupRecapEl = document.getElementById("dedup-recap");
-const dedupRecapMeta = document.getElementById("dedup-recap-meta");
-const dedupRecapList = document.getElementById("dedup-recap-list");
-const btnDedupApply = document.getElementById("btn-dedup-apply");
-const btnDedupDismiss = document.getElementById("btn-dedup-dismiss");
 const btnSelectAll = document.getElementById("btn-select-all");
 const btnSelectNone = document.getElementById("btn-select-none");
 const btnEncode = document.getElementById("btn-encode");
 const btnStopAll = document.getElementById("btn-stop-all");
-/** Analyse doublons en cours (pour afficher Stop) */
-let dedupBusy = false;
-/** Résultat en attente de confirmation UI */
-let pendingDedupResult = null;
 const fileListEl = document.getElementById("file-list");
 const scanMetaEl = document.getElementById("scan-meta");
 const gpuBadge = document.getElementById("gpu-badge");
@@ -133,45 +121,6 @@ function renderRunSavings(run, total) {
     <pre style="margin:0.5rem 0 0;white-space:pre-wrap;font-size:0.8rem;color:var(--text-dim)">${escapeHtml(lines.join("\n") + more)}</pre>
   `;
   updateSavingsBadge(total);
-}
-
-function hideDedupRecap() {
-  pendingDedupResult = null;
-  if (dedupRecapEl) dedupRecapEl.classList.add("hidden");
-  if (dedupRecapList) dedupRecapList.innerHTML = "";
-  if (dedupRecapMeta) dedupRecapMeta.textContent = "";
-}
-
-function showDedupRecap(data) {
-  pendingDedupResult = data;
-  if (!dedupRecapEl || !dedupRecapList || !dedupRecapMeta) return;
-  const groups = data.groups || [];
-  dedupRecapMeta.textContent =
-    `${data.group_count || 0} groupe(s) · ${data.delete_count || 0} fichier(s) à supprimer · ` +
-    `économie ${formatSaved(data.bytes_reclaimable || 0)} · ${data.files_scanned || 0} scannés ` +
-    `(critère: même nom + taille)`;
-  dedupRecapList.innerHTML = "";
-  groups.forEach((g) => {
-    const keep = g.keep || {};
-    const dels = g.delete || [];
-    const block = document.createElement("div");
-    block.className = "dedup-group";
-    const delHtml = dels
-      .map(
-        (d) =>
-          `<div class="dedup-path">✕ ${escapeHtml(d.path || d.name || "")} · ${formatSize(d.size)}</div>`
-      )
-      .join("");
-    block.innerHTML = `
-      <div><strong>${escapeHtml(keep.name || g.name || "?")}</strong> · ${formatSize(g.size)} · ${g.count} copie(s)</div>
-      <div class="dedup-keep">✓ Garder: <span class="dedup-path">${escapeHtml(keep.path || "")}</span></div>
-      <div class="dedup-del">Supprimer (${dels.length}):</div>
-      ${delHtml}
-    `;
-    dedupRecapList.appendChild(block);
-  });
-  dedupRecapEl.classList.remove("hidden");
-  dedupRecapEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 async function api(path, opts = {}) {
@@ -832,150 +781,6 @@ async function pollSession({ bootstrap = false } = {}) {
     if (batchMeta) batchMeta.textContent = `Erreur sync: ${e.message}`;
   }
 }
-
-let dedupPollTimer = null;
-let dedupJobId = null;
-
-function showDedupLog(lines, message) {
-  if (dedupLogTitle) dedupLogTitle.classList.remove("hidden");
-  if (dedupLogEl) {
-    dedupLogEl.classList.remove("hidden");
-    const text = (lines && lines.length ? lines.join("\n") : "") +
-      (message ? `\n› ${message}` : "");
-    dedupLogEl.textContent = text || "—";
-    dedupLogEl.scrollTop = dedupLogEl.scrollHeight;
-  }
-}
-
-function setDedupUiRunning(running) {
-  dedupBusy = !!running;
-  if (btnDedup) {
-    btnDedup.disabled = running;
-    btnDedup.textContent = running ? "Analyse…" : "Doublons";
-  }
-  refreshStopButton();
-}
-
-async function cancelDedupAnalysis() {
-  try {
-    await api("/api/dedup/cancel", {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-    showDedupLog(null, "Annulation demandée…");
-  } catch (e) {
-    /* pas de job = ok */
-  }
-}
-
-function finishDedupFromResult(data) {
-  if (!(data.group_count > 0) || !(data.delete_count > 0)) {
-    hideDedupRecap();
-    alert(
-      `Aucun doublon (même nom + taille) trouvé.\n(${data.files_scanned || 0} fichiers scannés)`
-    );
-    return;
-  }
-  showDedupRecap(data);
-}
-
-async function applyPendingDedup() {
-  const data = pendingDedupResult;
-  if (!data) return;
-  const paths = [];
-  (data.groups || []).forEach((g) => {
-    (g.delete || []).forEach((d) => {
-      if (d.path) paths.push(d.path);
-    });
-  });
-  if (!paths.length) {
-    hideDedupRecap();
-    return;
-  }
-  if (btnDedupApply) btnDedupApply.disabled = true;
-  try {
-    const res = await api("/api/dedup/delete", {
-      method: "POST",
-      body: JSON.stringify({
-        paths,
-        work_dir: workDirEl.value.trim(),
-      }),
-    });
-    hideDedupRecap();
-    if (res.savings) updateSavingsBadge(res.savings);
-    if (res.run_savings) renderRunSavings(res.run_savings, res.savings);
-    alert(
-      `Dédoublonnage: ${res.deleted || 0} fichier(s) supprimé(s) · ${formatSaved(res.bytes_freed || 0)}`
-    );
-    btnScan.click();
-  } catch (e) {
-    alert(`Dédoublonnage: ${e.message}`);
-  } finally {
-    if (btnDedupApply) btnDedupApply.disabled = false;
-  }
-}
-
-async function pollDedupStatus() {
-  try {
-    const q = dedupJobId ? `?job_id=${encodeURIComponent(dedupJobId)}` : "";
-    const st = await api(`/api/dedup/status${q}`);
-    showDedupLog(st.log || [], st.message || "");
-    if (st.id) dedupJobId = st.id;
-    if (st.state === "running") {
-      setDedupUiRunning(true);
-      return;
-    }
-    if (dedupPollTimer) {
-      clearInterval(dedupPollTimer);
-      dedupPollTimer = null;
-    }
-    setDedupUiRunning(false);
-    if (st.state === "done" && st.result) {
-      await finishDedupFromResult(st.result);
-    } else if (st.state === "error") {
-      alert(`Doublons: ${st.error || st.message || "erreur"}`);
-    } else if (st.state === "cancelled") {
-      alert("Analyse doublons annulée.");
-    }
-  } catch (e) {
-    if (dedupPollTimer) {
-      clearInterval(dedupPollTimer);
-      dedupPollTimer = null;
-    }
-    setDedupUiRunning(false);
-    alert(`Doublons (status): ${e.message}`);
-  }
-}
-
-if (btnDedup) {
-  btnDedup.addEventListener("click", async () => {
-    hideDedupRecap();
-    setDedupUiRunning(true);
-    showDedupLog([], "Démarrage…");
-    try {
-      const job = await api("/api/dedup/scan", {
-        method: "POST",
-        body: JSON.stringify({ work_dir: workDirEl.value.trim() }),
-      });
-      dedupJobId = job.id || null;
-      showDedupLog(job.log || [], job.message || "En cours…");
-      if (dedupPollTimer) clearInterval(dedupPollTimer);
-      dedupPollTimer = setInterval(pollDedupStatus, 1000);
-      await pollDedupStatus();
-    } catch (e) {
-      setDedupUiRunning(false);
-      alert(`Doublons: ${e.message}`);
-    }
-  });
-}
-
-if (btnDedupApply) {
-  btnDedupApply.addEventListener("click", () => applyPendingDedup());
-}
-if (btnDedupDismiss) {
-  btnDedupDismiss.addEventListener("click", () => hideDedupRecap());
-}
-
 
 btnScan.addEventListener("click", async () => {
   scanMetaEl.textContent = "Analyse en cours…";
